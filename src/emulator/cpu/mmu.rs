@@ -26,6 +26,11 @@ const HRAM_START: u16 = 0xFF80;
 const REG_SB: u16 = 0xFF01;
 const REG_SC: u16 = 0xFF02;
 
+const REG_DIV: u16 = 0xFF04;
+const REG_TIMA: u16 = 0xFF05;
+const REG_TMA: u16 = 0xFF06;
+const REG_TAC: u16 = 0xFF07;
+
 const REG_IE: u16 = 0xFFFF;
 
 pub(super) struct MMU {
@@ -65,6 +70,11 @@ impl MMU {
             REG_SB => self.serial.data(),
             REG_SC => self.serial.control(),
 
+            REG_DIV => self.timer.divider(),
+            REG_TIMA => self.timer.counter(),
+            REG_TMA => self.timer.modulo(),
+            REG_TAC => self.timer.control(),
+
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize],
             REG_IE => self.interrupt_enable,
 
@@ -84,10 +94,19 @@ impl MMU {
             REG_SB => self.serial.set_data(value),
             REG_SC => self.serial.set_control(value),
 
+            REG_DIV => self.timer.set_divider(),
+            REG_TIMA => self.timer.set_counter(value),
+            REG_TMA => self.timer.set_modulo(value),
+            REG_TAC => self.timer.set_control(value),
+
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize] = value,
             REG_IE => self.interrupt_enable = value,
 
             _ => {}
         }
+    }
+
+    pub(super) fn cycle(&mut self, ticks: u32) {
+        self.timer.cycle(ticks);
     }
 }

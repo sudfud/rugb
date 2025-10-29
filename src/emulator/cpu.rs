@@ -48,6 +48,10 @@ impl CPU {
         }
     }
 
+    pub(super) fn pc(&self) -> u16 {
+        self.registers.pc
+    }
+
     pub(super) fn read(&self, address: u16) -> u8 {
         self.mmu.read(address)
     }
@@ -59,7 +63,11 @@ impl CPU {
     pub(super) fn execute(&mut self) -> Result<u32, CPUError> {
         self.update_ime();
 
-        self.step()
+        let cycles = self.step()? * 4;
+
+        self.mmu.cycle(cycles);
+
+        Ok(cycles)
     }
 
     fn step(&mut self) -> Result<u32, CPUError> {
@@ -3525,6 +3533,12 @@ impl CPU {
             },
             _ => 0
         };
+    }
+}
+
+impl std::fmt::Display for CPU {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.registers.fmt(f)
     }
 }
 
