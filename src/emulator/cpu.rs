@@ -951,7 +951,7 @@ impl CPU {
             // ADD A, (HL)
             0x86 => {
                 self.add_a(self.read(self.registers.hl()), false);
-                Ok(1)
+                Ok(2)
             },
 
             // ADD A, A
@@ -999,7 +999,7 @@ impl CPU {
             // ADC A, (HL)
             0x8E => {
                 self.add_a(self.read(self.registers.hl()), true);
-                Ok(1)
+                Ok(2)
             },
 
             // ADC A, A
@@ -1047,7 +1047,7 @@ impl CPU {
             // SUB A, (HL)
             0x96 => {
                 self.sub_a(self.read(self.registers.hl()), false);
-                Ok(1)
+                Ok(2)
             },
 
             // SUB A, A
@@ -1095,7 +1095,7 @@ impl CPU {
             // SBC A, (HL)
             0x9E => {
                 self.sub_a(self.read(self.registers.hl()), true);
-                Ok(1)
+                Ok(2)
             },
 
             // SBC A, A
@@ -1143,7 +1143,7 @@ impl CPU {
             // AND A, (HL)
             0xA6 => {
                 self.and_a(self.read(self.registers.hl()));
-                Ok(1)
+                Ok(2)
             },
 
             // AND A, A
@@ -1191,7 +1191,7 @@ impl CPU {
             // XOR A, (HL)
             0xAE => {
                 self.xor_a(self.read(self.registers.hl()));
-                Ok(1)
+                Ok(2)
             },
 
             // XOR A, A
@@ -1239,7 +1239,7 @@ impl CPU {
             // OR A, (HL)
             0xB6 => {
                 self.or_a(self.read(self.registers.hl()));
-                Ok(1)
+                Ok(2)
             },
 
             // OR A, A
@@ -1287,7 +1287,7 @@ impl CPU {
             // CP A, (HL)
             0xBE => {
                 self.cp_a(self.read(self.registers.hl()));
-                Ok(1)
+                Ok(2)
             },
 
             // CP A, A
@@ -2099,7 +2099,7 @@ impl CPU {
             // BIT 0, (HL)
             0x46 => {
                 self.bit_test(self.read(self.registers.hl()), 0);
-                4
+                3
             },
 
             // BIT 0, A
@@ -2147,7 +2147,7 @@ impl CPU {
             // BIT 1, (HL)
             0x4E => {
                 self.bit_test(self.read(self.registers.hl()), 1);
-                4
+                3
             },
 
             // BIT 1, A
@@ -2195,7 +2195,7 @@ impl CPU {
             // BIT 2, (HL)
             0x56 => {
                 self.bit_test(self.read(self.registers.hl()), 2);
-                4
+                3
             },
 
             // BIT 2, A
@@ -2243,7 +2243,7 @@ impl CPU {
             // BIT 3, (HL)
             0x5E => {
                 self.bit_test(self.read(self.registers.hl()), 3);
-                4
+                3
             },
 
             // BIT 3, A
@@ -2291,7 +2291,7 @@ impl CPU {
             // BIT 4, (HL)
             0x66 => {
                 self.bit_test(self.read(self.registers.hl()), 4);
-                4
+                3
             },
 
             // BIT 4, A
@@ -2339,7 +2339,7 @@ impl CPU {
             // BIT 5, (HL)
             0x6E => {
                 self.bit_test(self.read(self.registers.hl()), 5);
-                4
+                3
             },
 
             // BIT 5, A
@@ -2387,7 +2387,7 @@ impl CPU {
             // BIT 6, (HL)
             0x76 => {
                 self.bit_test(self.read(self.registers.hl()), 6);
-                4
+                3
             },
 
             // BIT 6, A
@@ -2435,7 +2435,7 @@ impl CPU {
             // BIT 7, (HL)
             0x7E => {
                 self.bit_test(self.read(self.registers.hl()), 7);
-                4
+                3
             },
 
             // BIT 7, A
@@ -2484,7 +2484,7 @@ impl CPU {
             0x86 => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 0);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 0, A
@@ -2533,7 +2533,7 @@ impl CPU {
             0x8E => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 1);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 1, A
@@ -2582,7 +2582,7 @@ impl CPU {
             0x96 => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 2);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 2, A
@@ -2631,7 +2631,7 @@ impl CPU {
             0x9E => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 3);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 3, A
@@ -2680,7 +2680,7 @@ impl CPU {
             0xA6 => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 4);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 4, A
@@ -2729,7 +2729,7 @@ impl CPU {
             0xAE => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 5);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 5, A
@@ -2778,7 +2778,7 @@ impl CPU {
             0xB6 => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 6);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 6, A
@@ -2827,7 +2827,7 @@ impl CPU {
             0xBE => {
                 let byte = self.bit_reset(self.read(self.registers.hl()), 7);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // RES 7, A
@@ -2876,7 +2876,7 @@ impl CPU {
             0xC6 => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 0);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 0, A
@@ -2925,7 +2925,7 @@ impl CPU {
             0xCE => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 1);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 1, A
@@ -2974,7 +2974,7 @@ impl CPU {
             0xD6 => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 2);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 2, A
@@ -3023,7 +3023,7 @@ impl CPU {
             0xDE => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 3);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 3, A
@@ -3072,7 +3072,7 @@ impl CPU {
             0xE6 => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 4);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 4, A
@@ -3121,7 +3121,7 @@ impl CPU {
             0xEE => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 5);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 5, A
@@ -3170,7 +3170,7 @@ impl CPU {
             0xF6 => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 6);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 6, A
@@ -3219,7 +3219,7 @@ impl CPU {
             0xFE => {
                 let byte = self.bit_set(self.read(self.registers.hl()), 7);
                 self.write(self.registers.hl(), byte);
-                2
+                4
             },
 
             // SET 7, A
