@@ -35,25 +35,15 @@ pub(super) struct Emulator {
 
 impl Emulator {
     pub(super) fn run(&mut self) -> Result<(), EmulatorError> {
-        let mut output = String::new();
-
         loop {
             let _cycles = self.cpu.execute().map_err(EmulatorError::CPU)?;
 
             if self.cpu.read(0xFF02) == 0x81 {
                 let c = self.cpu.read(0xFF01) as char;
-                output.push(c);
+                print!("{}", c);
                 self.cpu.write(0xFF02, 0x00);
-
-                if output.contains("Passed") || output.contains("Failed") {
-                    break;
-                }
             }
         }
-
-        println!("{}", output);
-
-        Ok(())
     }
 }
 

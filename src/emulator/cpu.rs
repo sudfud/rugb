@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use super::Cartridge;
 
-use mmu::MMU;
+use mmu::{Interrupt, MMU};
 use registers::{FlagMask, Registers};
 
 #[derive(Debug)]
@@ -52,6 +52,10 @@ impl CPU {
         self.registers.pc
     }
 
+    pub(super) fn halted(&self) -> bool {
+        self.halted
+    }
+
     pub(super) fn read(&self, address: u16) -> u8 {
         self.mmu.read(address)
     }
@@ -61,8 +65,6 @@ impl CPU {
     }
 
     pub(super) fn execute(&mut self) -> Result<u32, CPUError> {
-        self.update_ime();
-
         let cycles = self.step()? * 4;
 
         self.mmu.cycle(cycles);
@@ -71,6 +73,17 @@ impl CPU {
     }
 
     fn step(&mut self) -> Result<u32, CPUError> {
+        self.update_ime();
+
+        match self.handle_interrupts() {
+            0 => {},
+            n => return Ok(n)
+        }
+
+        if self.halted {
+            return Ok(1);
+        }
+
         let opcode = self.next_byte();
 
         match opcode {
@@ -1577,7 +1590,7 @@ impl CPU {
 
             // DI
             0xF3 => {
-                self.di_timer = 2;
+                self.di_timer = 1;
                 Ok(1)
             },
 
@@ -3534,11 +3547,75 @@ impl CPU {
             _ => 0
         };
     }
+
+    fn handle_interrupts(&mut self) -> u32 {
+        if self.mmu.interrupt_enabled() {
+            self.halted = false;
+
+            if self.interrupt_master_enable {
+                self.interrupt_master_enable = false;
+
+                if self.mmu.interrupt_flag(Interrupt::VBlank) {
+                    self.push_stack(self.registers.pc);
+                    self.registers.pc = 0x0040;
+                    self.mmu.unflag_interrupt(Interrupt::VBlank);
+                    return 5;
+                }
+
+                if self.mmu.interrupt_flag(Interrupt::LCD) {
+                    self.push_stack(self.registers.pc);
+                    self.registers.pc = 0x0048;
+                    self.mmu.unflag_interrupt(Interrupt::LCD);
+                    return 5;
+                }
+
+                if self.mmu.interrupt_flag(Interrupt::Timer) {
+                    self.push_stack(self.registers.pc);
+                    self.registers.pc = 0x0050;
+                    self.mmu.unflag_interrupt(Interrupt::Timer);
+                    return 5;
+                }
+
+                if self.mmu.interrupt_flag(Interrupt::Serial) {
+                    self.push_stack(self.registers.pc);
+                    self.registers.pc = 0x0058;
+                    self.mmu.unflag_interrupt(Interrupt::Serial);
+                    return 5;
+                }
+
+                if self.mmu.interrupt_flag(Interrupt::Joypad) {
+                    self.push_stack(self.registers.pc);
+                    self.registers.pc = 0x0060;
+                    self.mmu.unflag_interrupt(Interrupt::Joypad);
+                    return 5;
+                }
+            }
+        }
+
+        0
+    }
 }
 
 impl std::fmt::Display for CPU {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.registers.fmt(f)
+        write!(
+            f,
+            "A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}",
+            self.registers.a,
+            self.registers.f,
+            self.registers.b,
+            self.registers.c,
+            self.registers.d,
+            self.registers.e,
+            self.registers.h,
+            self.registers.l,
+            self.registers.sp,
+            self.registers.pc,
+            self.read(self.registers.pc),
+            self.read(self.registers.pc.wrapping_add(1)),
+            self.read(self.registers.pc.wrapping_add(2)),
+            self.read(self.registers.pc.wrapping_add(3))
+        )
     }
 }
 

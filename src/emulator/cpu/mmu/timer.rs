@@ -13,13 +13,13 @@ pub(super) struct Timer {
 impl Timer {
     pub(super) fn new() -> Self {
         Self {
-            divider: 0xAB,
+            divider: 0x00,
             counter: 0x00,
             modulo: 0x00,
             control: 0x00,
             enabled: false,
             step_count: 1024,
-            system_clock: 0xCC,
+            system_clock: 0x00,
             timer_clock: 0x00,
             interrupt: false
         }
@@ -66,6 +66,14 @@ impl Timer {
         };
     }
 
+    pub(super) fn interrupt(&self) -> bool {
+        self.interrupt
+    }
+
+    pub(super) fn set_interrupt(&mut self, value: bool) {
+        self.interrupt = value;
+    }
+
     pub(super) fn cycle(&mut self, ticks: u32) {
         self.system_clock += ticks;
 
@@ -75,6 +83,7 @@ impl Timer {
         }
 
         if self.enabled {
+            self.timer_clock += ticks;
             while self.timer_clock >= self.step_count {
                 self.counter = self.counter.wrapping_add(1);
 
