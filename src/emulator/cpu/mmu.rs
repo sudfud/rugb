@@ -33,7 +33,18 @@ const REG_TAC: u16 = 0xFF07;
 
 const REG_IF: u16 = 0xFF0F;
 
+const REG_LCDC: u16 = 0xFF40;
+const REG_STAT: u16 = 0xFF41;
+const REG_SCY: u16 = 0xFF42;
+const REG_SCX: u16 = 0xFF43;
 const REG_LY: u16 = 0xFF44;
+const REG_LYC: u16 = 0xFF45;
+const REG_DMA: u16 = 0xFF46;
+const REG_BGP: u16 = 0xFF47;
+const REG_OBP0: u16 = 0xFF48;
+const REG_OBP1: u16 = 0xFF49;
+const REG_WY: u16 = 0xFF4A;
+const REG_WX: u16 = 0xFF4B;
 
 const REG_IE: u16 = 0xFFFF;
 
@@ -97,9 +108,20 @@ impl MMU {
             REG_TMA => self.timer.modulo(),
             REG_TAC => self.timer.control(),
 
-            REG_LY => 0x90,
-
             REG_IF => self.interrupt_flag | 0xE0,
+
+            REG_LCDC => self.gpu.lcd_control(),
+            REG_STAT => self.gpu.lcd_status(),
+            REG_SCY => self.gpu.viewport_y(),
+            REG_SCX => self.gpu.viewport_x(),
+            REG_LY => self.gpu.lcd_y(),
+            REG_LYC => self.gpu.ly_compare(),
+            REG_DMA => self.gpu.dma_start(),
+            REG_BGP => self.gpu.bg_palette(),
+            REG_OBP0 => self.gpu.obj_palette_0(),
+            REG_OBP1 => self.gpu.obj_palette_1(),
+            REG_WY => self.gpu.window_y(),
+            REG_WX => self.gpu.window_x(),
 
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize],
             REG_IE => self.interrupt_enable,
@@ -131,6 +153,18 @@ impl MMU {
             REG_TAC => self.timer.set_control(value),
 
             REG_IF => self.interrupt_flag = value,
+
+            REG_LCDC => self.gpu.set_lcd_control(value),
+            REG_STAT => self.gpu.set_lcd_status(value),
+            REG_SCY => self.gpu.set_viewport_y(value),
+            REG_SCX => self.gpu.set_viewport_x(value),
+            REG_LYC => self.gpu.set_ly_compare(value),
+            REG_DMA => self.gpu.set_dma_start(value),
+            REG_BGP => self.gpu.set_bg_palette(value),
+            REG_OBP0 => self.gpu.set_obj_palette_0(value),
+            REG_OBP1 => self.gpu.set_obj_palette_1(value),
+            REG_WY => self.gpu.set_window_y(value),
+            REG_WX => self.gpu.set_window_x(value),
 
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize] = value,
             REG_IE => self.interrupt_enable = value,
