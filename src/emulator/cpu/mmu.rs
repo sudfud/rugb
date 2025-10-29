@@ -54,7 +54,7 @@ pub(super) struct MMU {
     hram: [u8; HRAM_SIZE],
     joypad: Joypad,
     serial: Serial,
-    timer: Timer,
+    pub timer: Timer,
     interrupt_enable: u8,
     interrupt_flag: u8
 }
@@ -72,6 +72,12 @@ impl MMU {
             interrupt_enable: 0x00,
             interrupt_flag: 0x00
         }
+    }
+
+    pub(super) fn read_cycle(&mut self, address: u16) -> u8 {
+        let byte = self.read(address);
+        self.cycle(4);
+        byte
     }
 
     pub(super) fn read(&self, address: u16) -> u8 {
@@ -100,6 +106,11 @@ impl MMU {
 
             _ => 0xFF
         }
+    }
+
+    pub(super) fn write_cycle(&mut self, address: u16, value: u8) {
+        self.write(address, value);
+        self.cycle(4);
     }
 
     pub(super) fn write(&mut self, address: u16, value: u8) {

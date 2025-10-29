@@ -1,4 +1,4 @@
-pub(super) struct Timer {
+pub struct Timer {
     divider: u8,
     counter: u8,
     modulo: u8,
@@ -6,7 +6,7 @@ pub(super) struct Timer {
     enabled: bool,
     step_count: u32,
     system_clock: u32,
-    timer_clock: u32,
+    pub timer_clock: u32,
     interrupt: bool
 }
 
