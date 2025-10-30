@@ -1,11 +1,11 @@
-mod gpu;
+mod ppu;
 mod joypad;
 mod serial;
 mod timer;
 
 use crate::emulator::cartridge::Cartridge;
 
-use gpu::GPU;
+use ppu::PPU;
 use joypad::Joypad;
 use serial::Serial;
 use timer::Timer;
@@ -60,7 +60,7 @@ pub(super) enum Interrupt {
 
 pub(super) struct MMU {
     cartridge: Cartridge,
-    gpu: GPU,
+    ppu: PPU,
     wram: [u8; WRAM_SIZE],
     hram: [u8; HRAM_SIZE],
     joypad: Joypad,
@@ -74,7 +74,7 @@ impl MMU {
     pub(super) fn new(cartridge: Cartridge) -> Self {
         Self {
             cartridge,
-            gpu: GPU::new(),
+            ppu: PPU::new(),
             wram: [0; WRAM_SIZE],
             hram: [0; HRAM_SIZE],
             joypad: Joypad::new(),
@@ -94,11 +94,11 @@ impl MMU {
     pub(super) fn read(&self, address: u16) -> u8 {
         match address {
             ROM_START..VRAM_START => self.cartridge.read_rom(address),
-            VRAM_START..RAM_START => self.gpu.read_vram(address - VRAM_START),
+            VRAM_START..RAM_START => self.ppu.read_vram(address - VRAM_START),
             RAM_START..WRAM_START => self.cartridge.read_ram(address - RAM_START),
             WRAM_START..ECHO_START => self.wram[(address - WRAM_START) as usize],
             ECHO_START..OAM_START => self.wram[(address - ECHO_START) as usize],
-            OAM_START..UNUSED_START => self.gpu.read_oam(address - OAM_START),
+            OAM_START..UNUSED_START => self.ppu.read_oam(address - OAM_START),
 
             REG_SB => self.serial.data(),
             REG_SC => self.serial.control(),
@@ -110,18 +110,18 @@ impl MMU {
 
             REG_IF => self.interrupt_flag | 0xE0,
 
-            REG_LCDC => self.gpu.lcd_control(),
-            REG_STAT => self.gpu.lcd_status(),
-            REG_SCY => self.gpu.viewport_y(),
-            REG_SCX => self.gpu.viewport_x(),
-            REG_LY => self.gpu.lcd_y(),
-            REG_LYC => self.gpu.ly_compare(),
-            REG_DMA => self.gpu.dma_start(),
-            REG_BGP => self.gpu.bg_palette(),
-            REG_OBP0 => self.gpu.obj_palette_0(),
-            REG_OBP1 => self.gpu.obj_palette_1(),
-            REG_WY => self.gpu.window_y(),
-            REG_WX => self.gpu.window_x(),
+            REG_LCDC => self.ppu.lcd_control(),
+            REG_STAT => self.ppu.lcd_status(),
+            REG_SCY => self.ppu.viewport_y(),
+            REG_SCX => self.ppu.viewport_x(),
+            REG_LY => self.ppu.lcd_y(),
+            REG_LYC => self.ppu.ly_compare(),
+            REG_DMA => self.ppu.dma_start(),
+            REG_BGP => self.ppu.bg_palette(),
+            REG_OBP0 => self.ppu.obj_palette_0(),
+            REG_OBP1 => self.ppu.obj_palette_1(),
+            REG_WY => self.ppu.window_y(),
+            REG_WX => self.ppu.window_x(),
 
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize],
             REG_IE => self.interrupt_enable,
@@ -138,11 +138,11 @@ impl MMU {
     pub(super) fn write(&mut self, address: u16, value: u8) {
         match address {
             ROM_START..VRAM_START => self.cartridge.write_rom(address, value),
-            VRAM_START..RAM_START => self.gpu.write_vram(address - VRAM_START, value),
+            VRAM_START..RAM_START => self.ppu.write_vram(address - VRAM_START, value),
             RAM_START..WRAM_START => self.cartridge.write_ram(address - RAM_START, value),
             WRAM_START..ECHO_START => self.wram[(address - WRAM_START) as usize] = value,
             ECHO_START..OAM_START => self.wram[(address - ECHO_START) as usize] = value,
-            OAM_START..UNUSED_START => self.gpu.write_oam(address - OAM_START, value),
+            OAM_START..UNUSED_START => self.ppu.write_oam(address - OAM_START, value),
 
             REG_SB => self.serial.set_data(value),
             REG_SC => self.serial.set_control(value),
@@ -154,17 +154,17 @@ impl MMU {
 
             REG_IF => self.interrupt_flag = value,
 
-            REG_LCDC => self.gpu.set_lcd_control(value),
-            REG_STAT => self.gpu.set_lcd_status(value),
-            REG_SCY => self.gpu.set_viewport_y(value),
-            REG_SCX => self.gpu.set_viewport_x(value),
-            REG_LYC => self.gpu.set_ly_compare(value),
-            REG_DMA => self.gpu.set_dma_start(value),
-            REG_BGP => self.gpu.set_bg_palette(value),
-            REG_OBP0 => self.gpu.set_obj_palette_0(value),
-            REG_OBP1 => self.gpu.set_obj_palette_1(value),
-            REG_WY => self.gpu.set_window_y(value),
-            REG_WX => self.gpu.set_window_x(value),
+            REG_LCDC => self.ppu.set_lcd_control(value),
+            REG_STAT => self.ppu.set_lcd_status(value),
+            REG_SCY => self.ppu.set_viewport_y(value),
+            REG_SCX => self.ppu.set_viewport_x(value),
+            REG_LYC => self.ppu.set_ly_compare(value),
+            REG_DMA => self.ppu.set_dma_start(value),
+            REG_BGP => self.ppu.set_bg_palette(value),
+            REG_OBP0 => self.ppu.set_obj_palette_0(value),
+            REG_OBP1 => self.ppu.set_obj_palette_1(value),
+            REG_WY => self.ppu.set_window_y(value),
+            REG_WX => self.ppu.set_window_x(value),
 
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize] = value,
             REG_IE => self.interrupt_enable = value,

@@ -1,7 +1,7 @@
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0xA0;
 
-pub(super) struct GPU {
+pub(super) struct PPU {
     vram: [u8; VRAM_SIZE],
     oam: [u8; OAM_SIZE],
     lcd_control: u8,
@@ -18,7 +18,7 @@ pub(super) struct GPU {
     window_y: u8,
 }
 
-impl GPU {
+impl PPU {
     pub(super) fn new() -> Self {
         Self {
             vram: [0; VRAM_SIZE],
