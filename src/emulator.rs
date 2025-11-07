@@ -7,6 +7,8 @@ use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
 
+use crate::LCD;
+
 use cartridge::{Cartridge, CartridgeError};
 use cpu::{CPU, CPUError};
 
@@ -34,27 +36,27 @@ pub(super) struct Emulator {
 }
 
 impl Emulator {
-    pub(super) fn run(&mut self) -> Result<(), EmulatorError> {
-        loop {
-            let _cycles = self.cpu.execute().map_err(EmulatorError::CPU)?;
-
-            if self.cpu.read(0xFF02) == 0x81 {
-                let c = self.cpu.read(0xFF01) as char;
-                print!("{}", c);
-                self.cpu.write(0xFF02, 0x00);
-            }
-        }
-    }
-}
-
-impl TryFrom<&Path> for Emulator {
-    type Error = EmulatorError;
-
-    fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        let cartridge = Cartridge::try_from(value).map_err(EmulatorError::Cartridge)?;
+    pub(super) fn new(cart_path: &Path, lcd: LCD) -> Result<Self, EmulatorError> {
+        let cartridge = Cartridge::try_from(cart_path).map_err(EmulatorError::Cartridge)?;
 
         Ok(Self {
-            cpu: CPU::new(cartridge),
+            cpu: CPU::new(cartridge, lcd),
         })
+    }
+
+    pub(super) fn pc(&self) -> u16 {
+        self.cpu.pc()
+    }
+
+    pub(super) fn step(&mut self) -> Result<(), EmulatorError> {
+        self.cpu.execute().map_err(EmulatorError::CPU)?;
+
+        if self.cpu.read(0xFF02) == 0x81 {
+            let c = self.cpu.read(0xFF01) as char;
+            print!("{}", c);
+            self.cpu.write(0xFF02, 0x00);
+        }
+
+        Ok(())
     }
 }

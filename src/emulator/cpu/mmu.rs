@@ -3,6 +3,7 @@ mod joypad;
 mod serial;
 mod timer;
 
+use crate::LCD;
 use crate::emulator::cartridge::Cartridge;
 
 use ppu::PPU;
@@ -71,10 +72,10 @@ pub(super) struct MMU {
 }
 
 impl MMU {
-    pub(super) fn new(cartridge: Cartridge) -> Self {
+    pub(super) fn new(cartridge: Cartridge, lcd: LCD) -> Self {
         Self {
             cartridge,
-            ppu: PPU::new(),
+            ppu: PPU::new(lcd),
             wram: [0; WRAM_SIZE],
             hram: [0; HRAM_SIZE],
             joypad: Joypad::new(),
@@ -179,6 +180,10 @@ impl MMU {
         if self.timer.interrupt() {
             self.interrupt_flag |= 0x04;
             self.timer.set_interrupt(false);
+        }
+
+        for _ in 0..ticks {
+            self.ppu.tick();
         }
     }
 

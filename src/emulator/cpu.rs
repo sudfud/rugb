@@ -1,6 +1,8 @@
 mod mmu;
 mod registers;
 
+use crate::LCD;
+
 use super::Cartridge;
 
 use mmu::{Interrupt, MMU};
@@ -34,10 +36,10 @@ pub(super) struct CPU {
 }
 
 impl CPU {
-    pub(super) fn new(cartridge: Cartridge) -> Self {
+    pub(super) fn new(cartridge: Cartridge, lcd: LCD) -> Self {
         Self {
             registers: Registers::new(),
-            mmu: MMU::new(cartridge),
+            mmu: MMU::new(cartridge, lcd),
             interrupt_master_enable: false,
             ei_timer: 0,
             di_timer: 0,

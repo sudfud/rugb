@@ -1,5 +1,9 @@
 use std::collections::VecDeque;
 
+use sdl2::pixels::Color;
+
+use crate::{LCD, SCREEN_WIDTH, SCREEN_HEIGHT};
+
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0xA0;
 
@@ -9,20 +13,31 @@ const TILE_SIZE_BYTES: usize = 16;
 const MAP0_START: usize = 0x1800;
 const MAP1_START: usize = 0x1C00;
 
+const SCANLINE_COUNT: u8 = 153;
+
+const SCANLINE_TIME: u32 = 456;
+const OAM_TIME: u32 = 80;
+
 pub(super) struct PPU {
     vram: [u8; VRAM_SIZE],
     oam: [u8; OAM_SIZE],
+    lcd: LCD,
     regs: Registers,
-    pixel_fetcher: PixelFetcher
+    pixel_fetcher: PixelFetcher,
+    draw_state: DrawState,
+    counter: u32
 }
 
 impl PPU {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(lcd: LCD) -> Self {
         Self {
             vram: [0; VRAM_SIZE],
             oam: [0; OAM_SIZE],
+            lcd,
             regs: Registers::new(),
-            pixel_fetcher: PixelFetcher::new()
+            pixel_fetcher: PixelFetcher::new(),
+            draw_state: DrawState::InitialLoad(0),
+            counter: 0
         }
     }
 
@@ -133,6 +148,109 @@ impl PPU {
     pub(super) fn set_window_y(&mut self, value: u8) {
         self.regs.window_y = value;
     }
+
+    pub(super) fn tick(&mut self) {
+        self.counter += 1;
+
+        match self.regs.lcd_status.ppu_mode() {
+            RenderMode::HBlank => if self.counter >= SCANLINE_TIME {
+                self.counter -= SCANLINE_TIME;
+                
+                self.regs.lcd_status.set_ppu_mode(
+                    if self.regs.lcd_y as usize >= SCREEN_HEIGHT {
+                        RenderMode::VBlank
+                    } else {
+                        RenderMode::ScanOAM
+                    }
+                );
+            },
+
+            RenderMode::VBlank => if self.counter >= SCANLINE_TIME {
+                self.counter -= SCANLINE_TIME;
+                self.regs.lcd_y += 1;
+
+                if self.regs.lcd_y == 0 || self.regs.lcd_y >= SCANLINE_COUNT {
+                    self.regs.lcd_y = 0;
+                    self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
+                }
+            },
+
+            // TODO: Implement OAM/Sprites
+            RenderMode::ScanOAM => if self.counter >= OAM_TIME {
+                self.counter -= OAM_TIME;
+                self.pixel_fetcher.x_position = 0;
+                self.pixel_fetcher.counter = 0;
+                self.pixel_fetcher.state = FetcherState::TileId;
+                self.pixel_fetcher.bg_queue.clear();
+                self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
+                self.draw_state = DrawState::InitialLoad(12);
+            },
+
+            RenderMode::Draw => {
+                self.pixel_fetcher.tick(&self.vram, &self.regs);
+
+                match self.draw_state {
+                    DrawState::InitialLoad(time_left) => if time_left > 0 {
+                        if !self.pixel_fetcher.bg_queue.is_empty() {
+                            self.pixel_fetcher.bg_queue.clear();
+                            self.pixel_fetcher.x_position = 0;
+                        }
+
+                        self.draw_state = DrawState::InitialLoad(time_left - 1);
+                    } else {
+                        self.draw_state = DrawState::DiscardPixels(self.regs.scroll_x as u32 % 8);
+                    },
+
+                    DrawState::DiscardPixels(time_left) => if time_left > 0 {
+                        self.pixel_fetcher.bg_queue.pop_front();
+                        self.draw_state = DrawState::DiscardPixels(time_left - 1);
+                    } else {
+                        self.draw_state = DrawState::ShiftPixels;
+                    },
+
+                    DrawState::ShiftPixels => {
+                        self.pixel_fetcher.tick(&self.vram, &self.regs);
+                        match self.pixel_fetcher.bg_queue.pop_front() {
+                            Some(pixel) => {
+                                let color = match pixel {
+                                    PixelColor::Zero => Color::RGB(0, 0, 0),
+                                    PixelColor::One => Color::RGB(64, 64, 64),
+                                    PixelColor::Two => Color::RGB(128, 128, 128),
+                                    PixelColor::Three => Color::RGB(255, 255, 255)
+                                };
+
+                                self.lcd.borrow_mut()[self.lcd_y() as usize][self.regs.lcd_x as usize] = color;
+
+                                self.regs.lcd_x += 1;
+
+                                if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
+                                    self.regs.lcd_y += 1;
+                                    self.regs.lcd_x = 0;
+
+                                    self.regs.lcd_status.set_ppu_mode(
+                                        if self.regs.lcd_y >= SCREEN_HEIGHT as u8 {
+                                            RenderMode::VBlank
+                                        } else {
+                                            RenderMode::HBlank
+                                        }
+                                    );
+                                }
+                            },
+                            None => return
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy)]
+enum DrawState {
+    InitialLoad(u32),
+    DiscardPixels(u32),
+    ShiftPixels
 }
 
 #[repr(u8)]
@@ -234,6 +352,15 @@ impl LcdStatus {
         }
     }
 
+    fn ppu_mode(&self) -> RenderMode {
+        match self.0 & 0x03 {
+            0 => RenderMode::HBlank,
+            1 => RenderMode::VBlank,
+            2 => RenderMode::ScanOAM,
+            _ => RenderMode::Draw
+        }
+    }
+
     fn set_ppu_mode(&mut self, mode: RenderMode) {
         self.0 &= 0xFC;
         self.0 |= mode as u8;
@@ -260,7 +387,7 @@ impl Registers {
     fn new() -> Self {
         Self {
             lcd_control: LcdControl(0x91),
-            lcd_status: LcdStatus(0x00),
+            lcd_status: LcdStatus(0x85),
             dma_start: 0x00,
             bg_palette: 0xFC,
             obj_palette_0: 0xFF,
