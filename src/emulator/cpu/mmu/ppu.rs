@@ -524,7 +524,7 @@ impl PixelFetcher {
             }
         };
 
-        bg_address + regs.lcd_y.wrapping_add(regs.scroll_y) as usize % 8
+        bg_address + 2 * (regs.lcd_y.wrapping_add(regs.scroll_y) as usize % 8)
     }
 
     fn fill_bg_queue(&mut self) {
