@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
 
-use crate::LCD;
+use crate::FrameBuffer;
 
 use cartridge::{Cartridge, CartridgeError};
 use cpu::{CPU, CPUError};
@@ -36,11 +36,11 @@ pub(super) struct Emulator {
 }
 
 impl Emulator {
-    pub(super) fn new(cart_path: &Path, lcd: LCD) -> Result<Self, EmulatorError> {
+    pub(super) fn new(cart_path: &Path, frame_buffer: FrameBuffer) -> Result<Self, EmulatorError> {
         let cartridge = Cartridge::try_from(cart_path).map_err(EmulatorError::Cartridge)?;
 
         Ok(Self {
-            cpu: CPU::new(cartridge, lcd),
+            cpu: CPU::new(cartridge, frame_buffer),
         })
     }
 
@@ -48,8 +48,8 @@ impl Emulator {
         self.cpu.pc()
     }
 
-    pub(super) fn step(&mut self) -> Result<(), EmulatorError> {
-        self.cpu.execute().map_err(EmulatorError::CPU)?;
+    pub(super) fn step(&mut self) -> Result<u32, EmulatorError> {
+        let ticks = self.cpu.execute().map_err(EmulatorError::CPU)?;
 
         if self.cpu.read(0xFF02) == 0x81 {
             let c = self.cpu.read(0xFF01) as char;
@@ -57,6 +57,6 @@ impl Emulator {
             self.cpu.write(0xFF02, 0x00);
         }
 
-        Ok(())
+        Ok(ticks)
     }
 }

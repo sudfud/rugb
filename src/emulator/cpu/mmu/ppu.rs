@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use sdl2::pixels::Color;
 
-use crate::{LCD, SCREEN_WIDTH, SCREEN_HEIGHT};
+use crate::{FrameBuffer, SCREEN_WIDTH, SCREEN_HEIGHT};
 
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0xA0;
@@ -21,7 +21,7 @@ const OAM_TIME: u32 = 80;
 pub(super) struct PPU {
     vram: [u8; VRAM_SIZE],
     oam: [u8; OAM_SIZE],
-    lcd: LCD,
+    frame_buffer: FrameBuffer,
     regs: Registers,
     pixel_fetcher: PixelFetcher,
     draw_state: DrawState,
@@ -29,11 +29,11 @@ pub(super) struct PPU {
 }
 
 impl PPU {
-    pub(super) fn new(lcd: LCD) -> Self {
+    pub(super) fn new(lcd: FrameBuffer) -> Self {
         Self {
             vram: [0; VRAM_SIZE],
             oam: [0; OAM_SIZE],
-            lcd,
+            frame_buffer: lcd,
             regs: Registers::new(),
             pixel_fetcher: PixelFetcher::new(),
             draw_state: DrawState::InitialLoad(0),
@@ -212,14 +212,19 @@ impl PPU {
                         self.pixel_fetcher.tick(&self.vram, &self.regs);
                         match self.pixel_fetcher.bg_queue.pop_front() {
                             Some(pixel) => {
-                                let color = match pixel {
-                                    PixelColor::Zero => Color::RGB(0, 0, 0),
-                                    PixelColor::One => Color::RGB(64, 64, 64),
-                                    PixelColor::Two => Color::RGB(128, 128, 128),
-                                    PixelColor::Three => Color::RGB(255, 255, 255)
+                                let row = self.regs.lcd_y as usize;
+                                let column = self.regs.lcd_x as usize;
+                                let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
+                                let (r, g, b) = match pixel {
+                                    PixelColor::Zero => (255, 255, 255),
+                                    PixelColor::One => (128, 128, 128),
+                                    PixelColor::Two => (64, 64, 64),
+                                    PixelColor::Three => (0, 0, 0)
                                 };
 
-                                self.lcd.borrow_mut()[self.lcd_y() as usize][self.regs.lcd_x as usize] = color;
+                                self.frame_buffer.borrow_mut()[pixel_address] = r;
+                                self.frame_buffer.borrow_mut()[pixel_address + 1] = g;
+                                self.frame_buffer.borrow_mut()[pixel_address + 2] = b;
 
                                 self.regs.lcd_x += 1;
 

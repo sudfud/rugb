@@ -8,16 +8,19 @@ use std::rc::Rc;
 
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
+use sdl2::pixels::{Color, PixelFormatEnum};
+use sdl2::render::TextureAccess;
 
 use std::time::Duration;
 
 use emulator::{Emulator, EmulatorError};
 
+const FRAME_TIME: u32 = 70224;
+
 const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
 
-type LCD = Rc<RefCell<[[Color; SCREEN_WIDTH]; SCREEN_HEIGHT]>>;
+type FrameBuffer = Rc<RefCell<[u8; SCREEN_WIDTH * SCREEN_HEIGHT * 3]>>;
 
 #[derive(Debug)]
 enum RugbError {
@@ -44,7 +47,7 @@ fn main() -> Result<(), RugbError> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() == 2 {
-        let lcd = Rc::new(RefCell::new([[Color::BLACK; SCREEN_WIDTH]; SCREEN_HEIGHT]));
+        let lcd = Rc::new(RefCell::new([0; SCREEN_WIDTH * SCREEN_HEIGHT * 3]));
         let mut emulator = Emulator::new(Path::new(&args[1]), Rc::clone(&lcd)).map_err(RugbError::Emulator)?;
 
         // SDL Setup
@@ -62,25 +65,39 @@ fn main() -> Result<(), RugbError> {
             .build()
             .map_err(|e| RugbError::SDL(e.to_string()))?;
 
+        let texture_creator = canvas.texture_creator();
+        let mut texture = texture_creator
+            .create_texture(
+                Some(PixelFormatEnum::RGB24),
+                TextureAccess::Streaming,
+                SCREEN_WIDTH as u32,
+                SCREEN_HEIGHT as u32
+            )
+            .map_err(|e| RugbError::SDL(e.to_string()))?;
+
         canvas.set_draw_color(Color::BLACK);
         canvas.clear();
         canvas.present();
 
         let mut event_pump = sdl_context.event_pump().map_err(RugbError::SDL)?;
+        let mut tick_count = 0;
 
         'running: loop {
-            emulator.step().map_err(RugbError::Emulator)?;
+            tick_count += emulator.step().map_err(RugbError::Emulator)?;
 
-            canvas.clear();
+            if tick_count >= FRAME_TIME {
+                tick_count -= FRAME_TIME;
 
-            for row in 0..SCREEN_HEIGHT {
-                for column in 0..SCREEN_WIDTH {
-                    canvas.set_draw_color(lcd.borrow()[row][column]);
-                    canvas.draw_point((column as i32, row as i32));
-                }
+                canvas.clear();
+
+                texture.with_lock(None, |pixels, pitch| {
+                    pixels.copy_from_slice(lcd.borrow().as_slice());
+                }).map_err(RugbError::SDL)?;
+
+                canvas.copy(&texture, None, None).map_err(RugbError::SDL)?;
+
+                canvas.present();
             }
-
-            canvas.present();
 
             for event in event_pump.poll_iter() {
                 match event {
@@ -88,7 +105,6 @@ fn main() -> Result<(), RugbError> {
                     _ => {}
                 }
             }
-            // std::thread::sleep(Duration::new(0, 1_000_000_000 / 60));
         }
     } else {
         println!("Usage: rugb [file path]");

@@ -3,7 +3,7 @@ mod joypad;
 mod serial;
 mod timer;
 
-use crate::LCD;
+use crate::FrameBuffer;
 use crate::emulator::cartridge::Cartridge;
 
 use ppu::PPU;
@@ -68,22 +68,32 @@ pub(super) struct MMU {
     serial: Serial,
     pub timer: Timer,
     interrupt_enable: u8,
-    interrupt_flag: u8
+    interrupt_flag: u8,
+    tick_counter: u32
 }
 
 impl MMU {
-    pub(super) fn new(cartridge: Cartridge, lcd: LCD) -> Self {
+    pub(super) fn new(cartridge: Cartridge, frame_buffer: FrameBuffer) -> Self {
         Self {
             cartridge,
-            ppu: PPU::new(lcd),
+            ppu: PPU::new(frame_buffer),
             wram: [0; WRAM_SIZE],
             hram: [0; HRAM_SIZE],
             joypad: Joypad::new(),
             serial: Serial::new(),
             timer: Timer::new(),
             interrupt_enable: 0x00,
-            interrupt_flag: 0x00
+            interrupt_flag: 0x00,
+            tick_counter: 0
         }
+    }
+
+    pub(super) fn tick_count(&self) -> u32 {
+        self.tick_counter
+    }
+
+    pub(super) fn reset_tick_counter(&mut self) {
+        self.tick_counter = 0;
     }
 
     pub(super) fn read_cycle(&mut self, address: u16) -> u8 {
@@ -175,6 +185,7 @@ impl MMU {
     }
 
     pub(super) fn cycle(&mut self, ticks: u32) {
+        self.tick_counter += ticks;
         self.timer.cycle(ticks);
 
         if self.timer.interrupt() {

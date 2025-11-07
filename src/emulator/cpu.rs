@@ -1,7 +1,7 @@
 mod mmu;
 mod registers;
 
-use crate::LCD;
+use crate::FrameBuffer;
 
 use super::Cartridge;
 
@@ -36,10 +36,10 @@ pub(super) struct CPU {
 }
 
 impl CPU {
-    pub(super) fn new(cartridge: Cartridge, lcd: LCD) -> Self {
+    pub(super) fn new(cartridge: Cartridge, frame_buffer: FrameBuffer) -> Self {
         Self {
             registers: Registers::new(),
-            mmu: MMU::new(cartridge, lcd),
+            mmu: MMU::new(cartridge, frame_buffer),
             interrupt_master_enable: false,
             ei_timer: 0,
             di_timer: 0,
@@ -63,21 +63,27 @@ impl CPU {
         self.mmu.write(address, value);
     }
 
-    pub(super) fn execute(&mut self) -> Result<(), CPUError> {
+    pub(super) fn execute(&mut self) -> Result<u32, CPUError> {
         self.update_ime();
 
         if self.handle_interrupts() {
-            return Ok(());
+            let tick_count = self.mmu.tick_count();
+            self.mmu.reset_tick_counter();
+            return Ok(tick_count);
         }
 
         if self.halted {
             self.mmu.cycle(4);
-            return Ok(());
+            self.mmu.reset_tick_counter();
+            return Ok(4);
         }
 
         self.step()?;
 
-        Ok(())
+        let tick_count = self.mmu.tick_count();
+        self.mmu.reset_tick_counter();
+
+        Ok(tick_count)
     }
 
     fn step(&mut self) -> Result<(), CPUError> {
@@ -2272,7 +2278,6 @@ impl CPU {
 
     fn handle_interrupts(&mut self) -> bool {
         if self.mmu.interrupt_enabled() {
-            // println!("Unhalt!");
             self.halted = false;
 
             if self.interrupt_master_enable {
