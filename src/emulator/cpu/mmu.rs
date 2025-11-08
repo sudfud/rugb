@@ -189,12 +189,17 @@ impl MMU {
         self.timer.cycle(ticks);
 
         if self.timer.interrupt() {
-            self.interrupt_flag |= 0x04;
+            self.interrupt_flag |= Interrupt::Timer as u8;
             self.timer.set_interrupt(false);
         }
 
         for _ in 0..ticks {
             self.ppu.tick();
+        }
+
+        if self.ppu.interrupt() {
+            self.interrupt_flag |= Interrupt::LCD as u8;
+            self.ppu.set_interrupt(false);
         }
     }
 

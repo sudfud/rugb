@@ -25,7 +25,9 @@ pub(super) struct PPU {
     regs: Registers,
     pixel_fetcher: PixelFetcher,
     draw_state: DrawState,
-    counter: u32
+    counter: u32,
+    stat_interrupt_line: bool,
+    interrupt: bool
 }
 
 impl PPU {
@@ -37,7 +39,9 @@ impl PPU {
             regs: Registers::new(),
             pixel_fetcher: PixelFetcher::new(),
             draw_state: DrawState::InitialLoad(0),
-            counter: 0
+            counter: 0,
+            stat_interrupt_line: false,
+            interrupt: false
         }
     }
 
@@ -71,6 +75,7 @@ impl PPU {
 
     pub(super) fn set_lcd_status(&mut self, value: u8) {
         self.regs.lcd_status.0 = (self.regs.lcd_status.0 & 0x07) | (value & 0xF8);
+        self.update_stat_interrupt();
     }
 
     pub(super) fn viewport_x(&self) -> u8 {
@@ -99,6 +104,8 @@ impl PPU {
 
     pub(super) fn set_ly_compare(&mut self, value: u8) {
         self.regs.ly_compare = value;
+        self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
+        self.update_stat_interrupt();
     }
 
     pub(super) fn dma_start(&self) -> u8 {
@@ -149,6 +156,14 @@ impl PPU {
         self.regs.window_y = value;
     }
 
+    pub(super) fn interrupt(&self) -> bool {
+        self.interrupt
+    }
+
+    pub(super) fn set_interrupt(&mut self, value: bool) {
+        self.interrupt = value;
+    }
+
     pub(super) fn tick(&mut self) {
         self.counter += 1;
 
@@ -163,15 +178,19 @@ impl PPU {
                         RenderMode::ScanOAM
                     }
                 );
+
+                self.update_stat_interrupt();
             },
 
             RenderMode::VBlank => if self.counter >= SCANLINE_TIME {
                 self.counter -= SCANLINE_TIME;
                 self.regs.lcd_y += 1;
+                self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
                 if self.regs.lcd_y == 0 || self.regs.lcd_y >= SCANLINE_COUNT {
                     self.regs.lcd_y = 0;
                     self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
+                    self.update_stat_interrupt();
                 }
             },
 
@@ -183,6 +202,7 @@ impl PPU {
                 self.pixel_fetcher.state = FetcherState::TileId;
                 self.pixel_fetcher.bg_queue.clear();
                 self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
+                self.update_stat_interrupt();
                 self.draw_state = DrawState::InitialLoad(12);
             },
 
@@ -215,11 +235,15 @@ impl PPU {
                                 let row = self.regs.lcd_y as usize;
                                 let column = self.regs.lcd_x as usize;
                                 let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
-                                let (r, g, b) = match pixel {
-                                    PixelColor::Zero => (255, 255, 255),
-                                    PixelColor::One => (128, 128, 128),
-                                    PixelColor::Two => (64, 64, 64),
-                                    PixelColor::Three => (0, 0, 0)
+                                let (r, g, b) = if self.regs.lcd_control.bg_window_enabled() {
+                                    match pixel {
+                                        PixelColor::Zero => (255, 255, 255),
+                                        PixelColor::One => (128, 128, 128),
+                                        PixelColor::Two => (64, 64, 64),
+                                        PixelColor::Three => (0, 0, 0)
+                                    }
+                                } else {
+                                    (255, 255, 255)
                                 };
 
                                 self.frame_buffer.borrow_mut()[pixel_address] = r;
@@ -239,6 +263,9 @@ impl PPU {
                                             RenderMode::HBlank
                                         }
                                     );
+
+                                    self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
+                                    self.update_stat_interrupt();
                                 }
                             },
                             None => return
@@ -246,6 +273,20 @@ impl PPU {
                     }
                 }
             }
+        }
+    }
+
+    fn update_stat_interrupt(&mut self) {
+        let status = &self.regs.lcd_status;
+        let prev = self.stat_interrupt_line;
+
+        self.stat_interrupt_line = (status.lyc_select() && status.lyc_ly_equal())
+            || (status.oam_scan_mode_select() && status.ppu_mode() == RenderMode::ScanOAM)
+            || (status.vblank_mode_select() && status.ppu_mode() == RenderMode::VBlank)
+            || (status.hblank_mode_select() && status.ppu_mode() == RenderMode::HBlank);
+
+        if !prev && self.stat_interrupt_line {
+            self.interrupt = true;
         }
     }
 }
@@ -322,7 +363,7 @@ impl LcdControl {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum RenderMode {
     HBlank = 0,
     VBlank = 1,
@@ -347,6 +388,10 @@ impl LcdStatus {
 
     fn hblank_mode_select(&self) -> bool {
         self.0 & 0x08 > 0x00
+    }
+
+    fn lyc_ly_equal(&self) -> bool {
+        self.0 & 0x04 > 0x00
     }
 
     fn set_lyc_ly_equal(&mut self, value: bool) {
