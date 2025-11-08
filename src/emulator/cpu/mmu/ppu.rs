@@ -196,7 +196,6 @@ impl PPU {
 
             // TODO: Implement OAM/Sprites
             RenderMode::ScanOAM => if self.counter >= OAM_TIME {
-                self.counter -= OAM_TIME;
                 self.pixel_fetcher.x_position = 0;
                 self.pixel_fetcher.counter = 0;
                 self.pixel_fetcher.state = FetcherState::TileId;
