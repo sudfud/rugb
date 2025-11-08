@@ -166,13 +166,23 @@ impl PPU {
 
     pub(super) fn tick(&mut self) {
         self.counter += 1;
-
+        
         match self.regs.lcd_status.ppu_mode() {
             RenderMode::HBlank => if self.counter >= SCANLINE_TIME {
                 self.counter -= SCANLINE_TIME;
+
+                self.regs.lcd_y += 1;
+                self.regs.lcd_x = 0;
+
+                self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
+
+                if self.pixel_fetcher.window_mode {
+                    self.pixel_fetcher.window_line_counter += 1;
+                }
                 
                 self.regs.lcd_status.set_ppu_mode(
                     if self.regs.lcd_y as usize >= SCREEN_HEIGHT {
+                        self.pixel_fetcher.window_line_counter = 0;
                         RenderMode::VBlank
                     } else {
                         RenderMode::ScanOAM
@@ -187,7 +197,7 @@ impl PPU {
                 self.regs.lcd_y += 1;
                 self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
-                if self.regs.lcd_y == 0 || self.regs.lcd_y >= SCANLINE_COUNT {
+                if self.regs.lcd_y == 1 || self.regs.lcd_y >= SCANLINE_COUNT {
                     self.regs.lcd_y = 0;
                     self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
                     self.update_stat_interrupt();
@@ -252,18 +262,7 @@ impl PPU {
                                 self.regs.lcd_x += 1;
 
                                 if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
-                                    self.regs.lcd_y += 1;
-                                    self.regs.lcd_x = 0;
-
-                                    self.regs.lcd_status.set_ppu_mode(
-                                        if self.regs.lcd_y >= SCREEN_HEIGHT as u8 {
-                                            RenderMode::VBlank
-                                        } else {
-                                            RenderMode::HBlank
-                                        }
-                                    );
-
-                                    self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
+                                    self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
                                     self.update_stat_interrupt();
                                 }
                             },
@@ -471,6 +470,7 @@ enum FetcherState {
 }
 
 struct PixelFetcher {
+    window_mode: bool,
     window_line_counter: u8,
     counter: u8,
     tile_index: u8,
@@ -484,6 +484,7 @@ struct PixelFetcher {
 impl PixelFetcher {
     fn new() -> Self {
         Self {
+            window_mode: false,
             window_line_counter: 0,
             counter: 0,
             tile_index: 0,
@@ -506,11 +507,20 @@ impl PixelFetcher {
 
                 self.counter = 0;
 
-                let bg_address = regs.lcd_control.bg_tile_map();
-                let x = self.x_position.wrapping_add(regs.scroll_x / 8) as usize & 0x1F;
-                let y = 32 * ((regs.lcd_y.wrapping_add(regs.scroll_y) & 0xFF) / 8) as usize;
+                self.tile_index = if self.window_mode {
+                    let window_address = regs.lcd_control.window_tile_map();
+                    let x = self.x_position as usize;
+                    let y = 32 * (self.window_line_counter as usize / 8);
 
-                self.tile_index = vram[bg_address + ((x + y) & 0x03FF)];
+                    vram[window_address + x + y]
+                } else {
+                    let bg_address = regs.lcd_control.bg_tile_map();
+                    let x = self.x_position.wrapping_add(regs.scroll_x / 8) as usize & 0x1F;
+                    let y = 32 * ((regs.lcd_y.wrapping_add(regs.scroll_y) & 0xFF) / 8) as usize;
+
+                    vram[bg_address + ((x + y) & 0x03FF)]
+                };
+                
                 self.state = FetcherState::TileDataLow;
             },
 
@@ -559,7 +569,7 @@ impl PixelFetcher {
     }
 
     fn tile_address(&self, regs: &Registers) -> usize {
-        let bg_address = match regs.lcd_control.address_mode() {
+        let address = match regs.lcd_control.address_mode() {
             AddressMode::Unsigned
                 => TILE_SIZE_BYTES * self.tile_index as usize,
             AddressMode::Signed => {
@@ -568,7 +578,11 @@ impl PixelFetcher {
             }
         };
 
-        bg_address + 2 * (regs.lcd_y.wrapping_add(regs.scroll_y) as usize % 8)
+        if self.window_mode {
+            address + 2 * (self.window_line_counter as usize % 8)
+        } else {
+            address + 2 * (regs.lcd_y.wrapping_add(regs.scroll_y) as usize % 8)
+        }
     }
 
     fn fill_bg_queue(&mut self) {
