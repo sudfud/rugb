@@ -13,7 +13,7 @@ const TILE_SIZE_BYTES: usize = 16;
 const MAP0_START: usize = 0x1800;
 const MAP1_START: usize = 0x1C00;
 
-const SCANLINE_COUNT: u8 = 153;
+const SCANLINE_COUNT: u8 = 154;
 
 const SCANLINE_TIME: u32 = 456;
 const OAM_TIME: u32 = 80;
