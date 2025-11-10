@@ -27,7 +27,8 @@ pub(super) struct PPU {
     draw_state: DrawState,
     counter: u32,
     stat_interrupt_line: bool,
-    interrupt: bool
+    interrupt: bool,
+    wy_latch: bool
 }
 
 impl PPU {
@@ -41,7 +42,8 @@ impl PPU {
             draw_state: DrawState::InitialLoad(0),
             counter: 0,
             stat_interrupt_line: false,
-            interrupt: false
+            interrupt: false,
+            wy_latch: false
         }
     }
 
@@ -67,6 +69,7 @@ impl PPU {
 
     pub(super) fn set_lcd_control(&mut self, value: u8) {
         self.regs.lcd_control.0 = value;
+        self.check_wy_latch();
     }
 
     pub(super) fn lcd_status(&self) -> u8 {
@@ -154,6 +157,7 @@ impl PPU {
 
     pub(super) fn set_window_y(&mut self, value: u8) {
         self.regs.window_y = value;
+        self.check_wy_latch();
     }
 
     pub(super) fn interrupt(&self) -> bool {
@@ -167,21 +171,25 @@ impl PPU {
     pub(super) fn tick(&mut self) {
         self.counter += 1;
         
+        self.check_wy_latch();
+        
         match self.regs.lcd_status.ppu_mode() {
             RenderMode::HBlank => if self.counter >= SCANLINE_TIME {
                 self.counter -= SCANLINE_TIME;
 
                 self.regs.lcd_y += 1;
-                self.regs.lcd_x = 0;
 
                 self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
                 if self.pixel_fetcher.window_mode {
                     self.pixel_fetcher.window_line_counter += 1;
                 }
+
+                self.pixel_fetcher.window_mode = false;
                 
                 self.regs.lcd_status.set_ppu_mode(
                     if self.regs.lcd_y as usize >= SCREEN_HEIGHT {
+                        self.wy_latch = false;
                         self.pixel_fetcher.window_line_counter = 0;
                         RenderMode::VBlank
                     } else {
@@ -206,10 +214,6 @@ impl PPU {
 
             // TODO: Implement OAM/Sprites
             RenderMode::ScanOAM => if self.counter >= OAM_TIME {
-                self.pixel_fetcher.x_position = 0;
-                self.pixel_fetcher.counter = 0;
-                self.pixel_fetcher.state = FetcherState::TileId;
-                self.pixel_fetcher.bg_queue.clear();
                 self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
                 self.update_stat_interrupt();
                 self.draw_state = DrawState::InitialLoad(12);
@@ -261,8 +265,23 @@ impl PPU {
 
                                 self.regs.lcd_x += 1;
 
+                                if !self.pixel_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
+                                    self.pixel_fetcher.window_mode = true;
+                                    self.pixel_fetcher.x_position = 0;
+                                    self.pixel_fetcher.counter = 0;
+                                    self.pixel_fetcher.state = FetcherState::TileId;
+                                    self.pixel_fetcher.bg_queue.clear();
+                                }
+
                                 if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
+                                    self.pixel_fetcher.x_position = 0;
+                                    self.pixel_fetcher.counter = 0;
+                                    self.pixel_fetcher.state = FetcherState::TileId;
+                                    self.pixel_fetcher.bg_queue.clear();
+
+                                    self.regs.lcd_x = 0;
                                     self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
+
                                     self.update_stat_interrupt();
                                 }
                             },
@@ -285,6 +304,12 @@ impl PPU {
 
         if !prev && self.stat_interrupt_line {
             self.interrupt = true;
+        }
+    }
+
+    fn check_wy_latch(&mut self) {
+        if !self.wy_latch && self.regs.lcd_control.window_enabled() && self.regs.lcd_y == self.regs.window_y {
+            self.wy_latch = true;
         }
     }
 }
