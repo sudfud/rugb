@@ -7,7 +7,7 @@ use crate::{FrameBuffer, SCREEN_WIDTH, SCREEN_HEIGHT};
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0xA0;
 
-const TILE_SIZE_PIXELS: u16 = 8;
+const TILE_SIZE_PIXELS: u8 = 8;
 const TILE_SIZE_BYTES: usize = 16;
 
 const MAP0_START: usize = 0x1800;
@@ -23,7 +23,8 @@ pub(super) struct PPU {
     oam: [u8; OAM_SIZE],
     frame_buffer: FrameBuffer,
     regs: Registers,
-    pixel_fetcher: PixelFetcher,
+    bg_fetcher: BackgroundFetcher,
+    sprite_fetcher: SpriteFetcher,
     draw_state: DrawState,
     counter: u32,
     stat_interrupt_line: bool,
@@ -38,7 +39,8 @@ impl PPU {
             oam: [0; OAM_SIZE],
             frame_buffer: lcd,
             regs: Registers::new(),
-            pixel_fetcher: PixelFetcher::new(),
+            bg_fetcher: BackgroundFetcher::new(),
+            sprite_fetcher: SpriteFetcher::new(),
             draw_state: DrawState::InitialLoad(0),
             counter: 0,
             stat_interrupt_line: false,
@@ -170,7 +172,7 @@ impl PPU {
 
     pub(super) fn tick(&mut self) {
         self.counter += 1;
-        
+
         self.check_wy_latch();
         
         match self.regs.lcd_status.ppu_mode() {
@@ -178,19 +180,18 @@ impl PPU {
                 self.counter -= SCANLINE_TIME;
 
                 self.regs.lcd_y += 1;
-
                 self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
-                if self.pixel_fetcher.window_mode {
-                    self.pixel_fetcher.window_line_counter += 1;
+                if self.bg_fetcher.window_mode {
+                    self.bg_fetcher.window_line_counter += 1;
                 }
 
-                self.pixel_fetcher.window_mode = false;
+                self.bg_fetcher.window_mode = false;
                 
                 self.regs.lcd_status.set_ppu_mode(
                     if self.regs.lcd_y as usize >= SCREEN_HEIGHT {
                         self.wy_latch = false;
-                        self.pixel_fetcher.window_line_counter = 0;
+                        self.bg_fetcher.window_line_counter = 0;
                         RenderMode::VBlank
                     } else {
                         RenderMode::ScanOAM
@@ -214,40 +215,44 @@ impl PPU {
 
             // TODO: Implement OAM/Sprites
             RenderMode::ScanOAM => if self.counter >= OAM_TIME {
+                self.sprite_fetcher.fill_buffer(&self.oam, &self.regs);
                 self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
                 self.update_stat_interrupt();
                 self.draw_state = DrawState::InitialLoad(12);
             },
 
             RenderMode::Draw => {
-                self.pixel_fetcher.tick(&self.vram, &self.regs);
+                self.bg_fetcher.tick(&self.vram, &self.regs);
 
                 match self.draw_state {
                     DrawState::InitialLoad(time_left) => if time_left > 0 {
-                        if !self.pixel_fetcher.bg_queue.is_empty() {
-                            self.pixel_fetcher.bg_queue.clear();
-                            self.pixel_fetcher.x_position = 0;
+                        // Discard first pixel fetch
+                        if !self.bg_fetcher.bg_queue.is_empty() {
+                            self.bg_fetcher.bg_queue.clear();
+                            self.bg_fetcher.x_position = 0;
                         }
 
                         self.draw_state = DrawState::InitialLoad(time_left - 1);
                     } else {
-                        self.draw_state = DrawState::DiscardPixels(self.regs.scroll_x as u32 % 8);
+                        self.draw_state = DrawState::DiscardPixels(self.regs.scroll_x % TILE_SIZE_PIXELS);
                     },
 
                     DrawState::DiscardPixels(time_left) => if time_left > 0 {
-                        self.pixel_fetcher.bg_queue.pop_front();
+                        self.bg_fetcher.bg_queue.pop_front();
                         self.draw_state = DrawState::DiscardPixels(time_left - 1);
                     } else {
                         self.draw_state = DrawState::ShiftPixels;
                     },
 
                     DrawState::ShiftPixels => {
-                        self.pixel_fetcher.tick(&self.vram, &self.regs);
-                        match self.pixel_fetcher.bg_queue.pop_front() {
+                        self.bg_fetcher.tick(&self.vram, &self.regs);
+                        match self.bg_fetcher.bg_queue.pop_front() {
                             Some(pixel) => {
                                 let row = self.regs.lcd_y as usize;
                                 let column = self.regs.lcd_x as usize;
                                 let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
+
+                                // Convert pixel color to RGB
                                 let (r, g, b) = if self.regs.lcd_control.bg_window_enabled() {
                                     match pixel {
                                         PixelColor::Zero => (255, 255, 255),
@@ -259,30 +264,27 @@ impl PPU {
                                     (255, 255, 255)
                                 };
 
+                                // Place each RGB channel into the frame buffer
                                 self.frame_buffer.borrow_mut()[pixel_address] = r;
                                 self.frame_buffer.borrow_mut()[pixel_address + 1] = g;
                                 self.frame_buffer.borrow_mut()[pixel_address + 2] = b;
 
                                 self.regs.lcd_x += 1;
 
-                                if !self.pixel_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
-                                    self.pixel_fetcher.window_mode = true;
-                                    self.pixel_fetcher.x_position = 0;
-                                    self.pixel_fetcher.counter = 0;
-                                    self.pixel_fetcher.state = FetcherState::TileId;
-                                    self.pixel_fetcher.bg_queue.clear();
-                                }
-
+                                // Move on to HBlank
                                 if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
-                                    self.pixel_fetcher.x_position = 0;
-                                    self.pixel_fetcher.counter = 0;
-                                    self.pixel_fetcher.state = FetcherState::TileId;
-                                    self.pixel_fetcher.bg_queue.clear();
+                                    self.bg_fetcher.reset();
 
                                     self.regs.lcd_x = 0;
                                     self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
 
                                     self.update_stat_interrupt();
+                                }
+
+                                // If we're at the window and it's enabled, reset BG pixel fetcher and set it to window mode
+                                else if !self.bg_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
+                                    self.bg_fetcher.window_mode = true;
+                                    self.bg_fetcher.reset();
                                 }
                             },
                             None => return
@@ -317,8 +319,8 @@ impl PPU {
 #[repr(u8)]
 #[derive(Clone, Copy)]
 enum DrawState {
-    InitialLoad(u32),
-    DiscardPixels(u32),
+    InitialLoad(u8),
+    DiscardPixels(u8),
     ShiftPixels
 }
 
@@ -367,7 +369,7 @@ impl LcdControl {
         }
     }
 
-    fn sprite_size(&self) -> u16 {
+    fn sprite_size(&self) -> u8 {
         if self.0 & 0x04 == 0x00 {
             TILE_SIZE_PIXELS
         }
@@ -494,7 +496,7 @@ enum FetcherState {
     Push
 }
 
-struct PixelFetcher {
+struct BackgroundFetcher {
     window_mode: bool,
     window_line_counter: u8,
     counter: u8,
@@ -506,7 +508,7 @@ struct PixelFetcher {
     bg_queue: VecDeque<PixelColor>
 }
 
-impl PixelFetcher {
+impl BackgroundFetcher {
     fn new() -> Self {
         Self {
             window_mode: false,
@@ -572,15 +574,7 @@ impl PixelFetcher {
                 self.counter = 0;
 
                 self.tile_data_high = vram[self.tile_address(regs) + 1];
-
-                if self.bg_queue.is_empty() {
-                    self.fill_bg_queue();
-                    self.x_position += 1;
-                    self.state = FetcherState::TileId;
-                }
-                else {
-                    self.state = FetcherState::Push;
-                }
+                self.state = FetcherState::Push;
             },
 
             FetcherState::Push => {
@@ -624,5 +618,232 @@ impl PixelFetcher {
 
             self.bg_queue.push_back(color);
         }
+    }
+
+    fn reset(&mut self) {
+        self.x_position = 0;
+        self.counter = 0;
+        self.state = FetcherState::TileId;
+        self.bg_queue.clear();
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy)]
+enum SpritePriority {
+    Front = 0,
+    Back = 0b1000_0000
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy)]
+enum Palette {
+    OBP0 = 0,
+    OBP1 = 0b0001_0000
+}
+
+struct Sprite {
+    oam_index: u8,
+    x: u8,
+    y: u8,
+    tile_number: u8,
+    flags: u8
+}
+
+impl Sprite {
+    fn new(oam_index: u8, x: u8, y: u8, tile_number: u8, flags: u8) -> Self {
+        Self {
+            oam_index,
+            x,
+            y,
+            tile_number,
+            flags
+        }
+    }
+
+    fn palette(&self) -> Palette {
+        match self.flags & 0x10 {
+            0 => Palette::OBP0,
+            _ => Palette::OBP1
+        }
+    }
+
+    fn flip_x(&self) -> bool {
+        self.flags & 0x20 > 0
+    }
+
+    fn flip_y(&self) -> bool {
+        self.flags & 0x40 > 0
+    }
+
+    fn priority(&self) -> SpritePriority {
+        match self.flags & 0x80 {
+            0 => SpritePriority::Front,
+            _ => SpritePriority::Back
+        }
+    }
+}
+
+struct SpritePixel {
+    color: PixelColor,
+    palette: Palette,
+    priority: SpritePriority
+}
+
+impl SpritePixel {
+    fn new(color: PixelColor, palette: Palette, priority: SpritePriority) -> Self {
+        Self {
+            color,
+            palette,
+            priority
+        }
+    }
+}
+
+struct SpriteFetcher {
+    counter: u8,
+    tile_index: u8,
+    tile_data_low: u8,
+    tile_data_high: u8,
+    state: FetcherState,
+    sprite_buffer: Vec<Sprite>,
+    current_sprite: Option<Sprite>,
+    sprite_queue: VecDeque<SpritePixel>
+}
+
+impl SpriteFetcher {
+    fn new() -> Self {
+        Self {
+            counter: 0,
+            tile_index: 0,
+            tile_data_low: 0,
+            tile_data_high: 0,
+            state: FetcherState::TileId,
+            sprite_buffer: Vec::with_capacity(10),
+            current_sprite: None,
+            sprite_queue: VecDeque::new()
+        }
+    }
+
+    fn tick(&mut self, vram: &[u8; VRAM_SIZE]) {
+        if let Some(ref sprite) = self.current_sprite {
+            match self.state {
+                FetcherState::TileId => {
+                    self.counter += 1;
+
+                    if self.counter < 2 {
+                        return;
+                    }
+
+                    self.counter = 0;
+                    self.tile_index = sprite.tile_number;
+                    self.state = FetcherState::TileDataLow;
+                },
+
+                FetcherState::TileDataLow => {
+                    self.counter += 1;
+
+                    if self.counter < 2 {
+                        return;
+                    }
+
+                    self.counter = 0;
+                    self.tile_data_low = vram[self.tile_index as usize * TILE_SIZE_BYTES];
+                    self.state = FetcherState::TileDataHigh;
+                },
+
+                FetcherState::TileDataHigh => {
+                    self.counter += 1;
+
+                    if self.counter < 2 {
+                        return;
+                    }
+
+                    self.counter = 0;
+                    self.tile_data_high = vram[(self.tile_index as usize * TILE_SIZE_BYTES) + 1];
+                    self.state = FetcherState::Push;
+                },
+
+                FetcherState::Push => {
+                    let start_index = if sprite.x < TILE_SIZE_PIXELS {
+                        TILE_SIZE_PIXELS - sprite.x
+                    } else if !self.sprite_queue.is_empty() {
+                        TILE_SIZE_PIXELS - self.sprite_queue.len() as u8
+                    } else {
+                        0
+                    };
+
+                    for bit in (start_index..TILE_SIZE_PIXELS).rev() {
+                        let mask = 1 << bit;
+                        let color_bit_low = (self.tile_data_low & mask) >> bit;
+                        let color_bit_high = (self.tile_data_high & mask) >> bit;
+                        let color = match (color_bit_high << 1) | color_bit_low {
+                            0 => PixelColor::Zero,
+                            1 => PixelColor::One,
+                            2 => PixelColor::Two,
+                            _ => PixelColor::Three
+                        };
+
+                        let sprite_pixel = SpritePixel {
+                            color,
+                            palette: sprite.palette(),
+                            priority: sprite.priority()
+                        };
+
+                        self.sprite_queue.push_back(sprite_pixel);
+                    }
+                }
+            }
+        }
+    }
+
+    fn fill_buffer(&mut self, oam: &[u8; OAM_SIZE], regs: &Registers) {
+        self.sprite_buffer.clear();
+
+        // Loop through each OAM entry
+        for i in (0..OAM_SIZE).step_by(4) {
+            let sprite_y = oam[i];
+            let line_y = regs.lcd_y + 16;
+            let height = regs.lcd_control.sprite_size();
+
+            // Move on to the next sprite if the current one is out of bounds
+            if line_y < sprite_y || line_y >= sprite_y + height {
+                continue;
+            }
+
+            let sprite_x = oam[i + 1];
+
+            if sprite_x <= 0 {
+                continue;
+            }
+
+            // Add this sprite to the buffer
+            let oam_index = i as u8 / 4;
+            let tile_number = oam[i + 2];
+            let flags = oam[i + 3];
+            let sprite = Sprite::new(oam_index, sprite_x, sprite_y, tile_number, flags);
+
+            self.sprite_buffer.push(sprite);
+
+            // Stop if the buffer is full
+            if self.sprite_buffer.len() == 10 {
+                break;
+            }
+        }
+
+        // Sort buffer by X position, or by OAM index if two sprites have the same X
+        self.sprite_buffer.sort_by(|a, b| {
+            if a.x != b.x {
+                b.x.cmp(&a.x)
+            }
+            else {
+                b.oam_index.cmp(&a.oam_index)
+            }
+        });
+    }
+
+    fn sprite_hit(&mut self, lcd_x: u8) -> bool {
+        self.current_sprite = self.sprite_buffer.pop_if(|spr| spr.x <= lcd_x + 8);
+        self.current_sprite.is_some()
     }
 }
