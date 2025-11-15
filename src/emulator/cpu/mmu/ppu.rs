@@ -27,6 +27,7 @@ pub(super) struct PPU {
     sprite_fetcher: SpriteFetcher,
     draw_state: DrawState,
     counter: u32,
+    draw_time: u32,
     stat_interrupt_line: bool,
     interrupt: bool,
     wy_latch: bool
@@ -43,6 +44,7 @@ impl PPU {
             sprite_fetcher: SpriteFetcher::new(),
             draw_state: DrawState::InitialLoad(0),
             counter: 0,
+            draw_time: 0,
             stat_interrupt_line: false,
             interrupt: false,
             wy_latch: false
@@ -218,26 +220,35 @@ impl PPU {
                 self.sprite_fetcher.fill_buffer(&self.oam, &self.regs);
                 self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
                 self.update_stat_interrupt();
-                self.draw_state = DrawState::InitialLoad(12);
+                self.draw_state = DrawState::InitialLoad(0);
             },
 
             RenderMode::Draw => {
+                self.draw_time += 1;
                 self.bg_fetcher.tick(&self.vram, &self.regs);
 
                 match self.draw_state {
-                    DrawState::InitialLoad(time_left) => if time_left > 0 {
-                        // Discard first pixel fetch
-                        if !self.bg_fetcher.bg_queue.is_empty() {
-                            self.bg_fetcher.bg_queue.clear();
-                            self.bg_fetcher.x_position = 0;
-                        }
+                    DrawState::InitialLoad(mut time) => {
+                        time += 1;
 
-                        self.draw_state = DrawState::InitialLoad(time_left - 1);
-                    } else {
-                        self.draw_state = DrawState::DiscardPixels(self.regs.scroll_x % TILE_SIZE_PIXELS);
+                        if time < 12 {
+                            // Discard first pixel fetch
+                            if !self.bg_fetcher.bg_queue.is_empty() {
+                                self.bg_fetcher.bg_queue.clear();
+                                self.bg_fetcher.x_position = 0;
+                            }
+
+                            self.draw_state = DrawState::InitialLoad(time);
+                        }
+                        else if self.regs.scroll_x % TILE_SIZE_PIXELS != 0 {
+                            self.draw_state = DrawState::DiscardPixels(self.regs.scroll_x % TILE_SIZE_PIXELS);
+                        }
+                        else {
+                            self.draw_state = DrawState::ShiftPixels;
+                        }
                     },
 
-                    DrawState::DiscardPixels(time_left) => if time_left > 0 {
+                    DrawState::DiscardPixels(time_left) => if time_left > 1 {
                         self.bg_fetcher.bg_queue.pop_front();
                         self.draw_state = DrawState::DiscardPixels(time_left - 1);
                     } else {
@@ -245,7 +256,13 @@ impl PPU {
                     },
 
                     DrawState::ShiftPixels => {
-                        self.bg_fetcher.tick(&self.vram, &self.regs);
+                        if !self.bg_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
+                            self.bg_fetcher.window_mode = true;
+                            self.bg_fetcher.reset();
+                            return;
+                        }
+
+                        // self.bg_fetcher.tick(&self.vram, &self.regs);
                         match self.bg_fetcher.bg_queue.pop_front() {
                             Some(pixel) => {
                                 let row = self.regs.lcd_y as usize;
@@ -277,14 +294,9 @@ impl PPU {
 
                                     self.regs.lcd_x = 0;
                                     self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
+                                    self.draw_time = 0;
 
                                     self.update_stat_interrupt();
-                                }
-
-                                // If we're at the window and it's enabled, reset BG pixel fetcher and set it to window mode
-                                else if !self.bg_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
-                                    self.bg_fetcher.window_mode = true;
-                                    self.bg_fetcher.reset();
                                 }
                             },
                             None => return
@@ -574,7 +586,15 @@ impl BackgroundFetcher {
                 self.counter = 0;
 
                 self.tile_data_high = vram[self.tile_address(regs) + 1];
-                self.state = FetcherState::Push;
+
+                if self.bg_queue.is_empty() {
+                    self.fill_bg_queue();
+                    self.x_position += 1;
+                    self.state = FetcherState::TileId;
+                }
+                else {
+                    self.state = FetcherState::Push;
+                }
             },
 
             FetcherState::Push => {
