@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-use sdl2::pixels::Color;
-
 use crate::{FrameBuffer, SCREEN_WIDTH, SCREEN_HEIGHT};
 
 const VRAM_SIZE: usize = 0x2000;
@@ -17,6 +15,11 @@ const SCANLINE_COUNT: u8 = 154;
 
 const SCANLINE_TIME: u32 = 456;
 const OAM_TIME: u32 = 80;
+
+const WHITE: (u8, u8, u8) = (255, 255, 255);
+const LIGHT_GRAY: (u8, u8, u8) = (192, 192, 192);
+const DARK_GRAY: (u8, u8, u8) = (96, 96, 96);
+const BLACK: (u8, u8, u8) = (0, 0, 0);
 
 pub(super) struct PPU {
     vram: [u8; VRAM_SIZE],
@@ -215,9 +218,9 @@ impl PPU {
                 }
             },
 
-            // TODO: Implement OAM/Sprites
             RenderMode::ScanOAM => if self.counter >= OAM_TIME {
                 self.sprite_fetcher.fill_buffer(&self.oam, &self.regs);
+
                 self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
                 self.update_stat_interrupt();
                 self.draw_state = DrawState::InitialLoad(0);
@@ -225,7 +228,22 @@ impl PPU {
 
             RenderMode::Draw => {
                 self.draw_time += 1;
-                self.bg_fetcher.tick(&self.vram, &self.regs);
+
+                if self.bg_fetcher.paused {
+                    self.sprite_fetcher.tick(&self.vram, &self.regs);
+
+                    // Sprite fetcher is still running
+                    if self.sprite_fetcher.current_sprite.is_some() {
+                        return;
+                    }
+
+                    // Sprite fetcher is done, resume background fetcher
+                    self.bg_fetcher.paused = false;
+                    return;
+                }
+                else {
+                    self.bg_fetcher.tick(&self.vram, &self.regs);
+                }
 
                 match self.draw_state {
                     DrawState::InitialLoad(mut time) => {
@@ -248,7 +266,7 @@ impl PPU {
                         }
                     },
 
-                    DrawState::DiscardPixels(time_left) => if time_left > 1 {
+                    DrawState::DiscardPixels(time_left) => if time_left > 0 {
                         self.bg_fetcher.bg_queue.pop_front();
                         self.draw_state = DrawState::DiscardPixels(time_left - 1);
                     } else {
@@ -256,30 +274,57 @@ impl PPU {
                     },
 
                     DrawState::ShiftPixels => {
+                        if self.regs.lcd_control.sprites_enabled() && self.sprite_fetcher.sprite_hit(self.regs.lcd_x) {
+                            self.bg_fetcher.paused = true;
+                            self.bg_fetcher.counter = 0;
+                            self.bg_fetcher.state = FetcherState::TileId;
+                            return;
+                        }
+
                         if !self.bg_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
                             self.bg_fetcher.window_mode = true;
                             self.bg_fetcher.reset();
                             return;
                         }
 
-                        // self.bg_fetcher.tick(&self.vram, &self.regs);
                         match self.bg_fetcher.bg_queue.pop_front() {
-                            Some(pixel) => {
+                            Some(bg_pixel) => {
+                                let (pixel, palette, is_sprite) = match self.sprite_fetcher.sprite_queue.pop_front() {
+                                    Some(sprite_pixel) => {
+                                        let sprite_palette = match sprite_pixel.palette {
+                                            Palette::OBP0 => self.regs.obj_palette_0,
+                                            Palette::OBP1 => self.regs.obj_palette_1
+                                        };
+
+                                        if let ColorIndex::Zero = sprite_pixel.color {
+                                            (bg_pixel, self.regs.bg_palette, false)
+                                        } else {
+                                            match sprite_pixel.priority {
+                                                SpritePriority::Front => (sprite_pixel.color, sprite_palette, true),
+                                                SpritePriority::Back => if bg_pixel != ColorIndex::Zero {
+                                                    (bg_pixel, self.regs.bg_palette, false)
+                                                } else {
+                                                    (sprite_pixel.color, sprite_palette, true)
+                                                }
+                                            }
+                                        }
+                                    },
+
+                                    None => (bg_pixel, self.regs.bg_palette, false)
+                                };
+
+                                // Convert pixel color to RGB
+                                let (r, g, b) = if is_sprite {
+                                    pixel.into_color(palette)
+                                } else if self.regs.lcd_control.bg_window_enabled() {
+                                    pixel.into_color(palette)
+                                } else {
+                                    WHITE
+                                };
+
                                 let row = self.regs.lcd_y as usize;
                                 let column = self.regs.lcd_x as usize;
                                 let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
-
-                                // Convert pixel color to RGB
-                                let (r, g, b) = if self.regs.lcd_control.bg_window_enabled() {
-                                    match pixel {
-                                        PixelColor::Zero => (255, 255, 255),
-                                        PixelColor::One => (128, 128, 128),
-                                        PixelColor::Two => (64, 64, 64),
-                                        PixelColor::Three => (0, 0, 0)
-                                    }
-                                } else {
-                                    (255, 255, 255)
-                                };
 
                                 // Place each RGB channel into the frame buffer
                                 self.frame_buffer.borrow_mut()[pixel_address] = r;
@@ -291,6 +336,8 @@ impl PPU {
                                 // Move on to HBlank
                                 if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
                                     self.bg_fetcher.reset();
+                                    self.sprite_fetcher.sprite_queue.clear();
+                                    self.sprite_fetcher.prev_sprite = None;
 
                                     self.regs.lcd_x = 0;
                                     self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
@@ -491,12 +538,27 @@ impl Registers {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy)]
-enum PixelColor {
-    Zero,
-    One,
-    Two,
-    Three
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorIndex {
+    Zero = 0,
+    One = 1,
+    Two = 2,
+    Three = 3
+}
+
+impl ColorIndex {
+    fn into_color(&self, palette_data: u8) -> (u8, u8, u8) {
+        let shift = (*self as u8) * 2;
+        let mask = 0x03 << shift;
+        let id = (palette_data & mask) >> shift;
+
+        match id {
+            0 => WHITE,
+            1 => LIGHT_GRAY,
+            2 => DARK_GRAY,
+            _ => BLACK
+        }
+    }
 }
 
 #[repr(u8)]
@@ -509,6 +571,7 @@ enum FetcherState {
 }
 
 struct BackgroundFetcher {
+    paused: bool,
     window_mode: bool,
     window_line_counter: u8,
     counter: u8,
@@ -517,12 +580,13 @@ struct BackgroundFetcher {
     tile_data_high: u8,
     state: FetcherState,
     x_position: u8,
-    bg_queue: VecDeque<PixelColor>
+    bg_queue: VecDeque<ColorIndex>
 }
 
 impl BackgroundFetcher {
     fn new() -> Self {
         Self {
+            paused: false,
             window_mode: false,
             window_line_counter: 0,
             counter: 0,
@@ -536,6 +600,10 @@ impl BackgroundFetcher {
     }
 
     fn tick(&mut self, vram: &[u8; VRAM_SIZE], regs: &Registers) {
+        if self.paused {
+            return;
+        }
+
         match self.state {
             FetcherState::TileId => {
                 self.counter += 1;
@@ -630,10 +698,10 @@ impl BackgroundFetcher {
             let color_bit_low = (self.tile_data_low & mask) >> bit;
             let color_bit_high = (self.tile_data_high & mask) >> bit;
             let color = match (color_bit_high << 1) | color_bit_low {
-                0 => PixelColor::Zero,
-                1 => PixelColor::One,
-                2 => PixelColor::Two,
-                _ => PixelColor::Three
+                0 => ColorIndex::Zero,
+                1 => ColorIndex::One,
+                2 => ColorIndex::Two,
+                _ => ColorIndex::Three
             };
 
             self.bg_queue.push_back(color);
@@ -662,6 +730,7 @@ enum Palette {
     OBP1 = 0b0001_0000
 }
 
+#[derive(Clone, Copy)]
 struct Sprite {
     oam_index: u8,
     x: u8,
@@ -704,20 +773,11 @@ impl Sprite {
     }
 }
 
+#[derive(Clone, Copy)]
 struct SpritePixel {
-    color: PixelColor,
+    color: ColorIndex,
     palette: Palette,
     priority: SpritePriority
-}
-
-impl SpritePixel {
-    fn new(color: PixelColor, palette: Palette, priority: SpritePriority) -> Self {
-        Self {
-            color,
-            palette,
-            priority
-        }
-    }
 }
 
 struct SpriteFetcher {
@@ -728,6 +788,7 @@ struct SpriteFetcher {
     state: FetcherState,
     sprite_buffer: Vec<Sprite>,
     current_sprite: Option<Sprite>,
+    prev_sprite: Option<Sprite>,
     sprite_queue: VecDeque<SpritePixel>
 }
 
@@ -741,12 +802,13 @@ impl SpriteFetcher {
             state: FetcherState::TileId,
             sprite_buffer: Vec::with_capacity(10),
             current_sprite: None,
+            prev_sprite: None,
             sprite_queue: VecDeque::new()
         }
     }
 
-    fn tick(&mut self, vram: &[u8; VRAM_SIZE]) {
-        if let Some(ref sprite) = self.current_sprite {
+    fn tick(&mut self, vram: &[u8; VRAM_SIZE], regs: &Registers) {
+        if let Some(sprite) = self.current_sprite {
             match self.state {
                 FetcherState::TileId => {
                     self.counter += 1;
@@ -757,6 +819,19 @@ impl SpriteFetcher {
 
                     self.counter = 0;
                     self.tile_index = sprite.tile_number;
+                    let mut y = regs.lcd_y + TILE_SIZE_PIXELS * 2 - sprite.y;
+                    if regs.lcd_control.sprite_size() == TILE_SIZE_PIXELS * 2 {
+                        if sprite.flip_y() {
+                            y = (regs.lcd_control.sprite_size() - 1) - y;
+                        }
+
+                        if y < TILE_SIZE_PIXELS {
+                            self.tile_index &= 0xFE;
+                        }
+                        else {
+                            self.tile_index = (self.tile_index & 0xFE) + 1;
+                        }
+                    }
                     self.state = FetcherState::TileDataLow;
                 },
 
@@ -768,7 +843,19 @@ impl SpriteFetcher {
                     }
 
                     self.counter = 0;
-                    self.tile_data_low = vram[self.tile_index as usize * TILE_SIZE_BYTES];
+                    let address = self.tile_index as usize * TILE_SIZE_BYTES;
+
+                    let mut y = (regs.lcd_y + TILE_SIZE_PIXELS * 2 - sprite.y) as usize;
+
+                    if sprite.flip_y() {
+                        y = (regs.lcd_control.sprite_size() - 1) as usize - y;
+                    }
+
+                    if regs.lcd_control.sprite_size() == TILE_SIZE_PIXELS * 2 {
+                        y %= TILE_SIZE_PIXELS as usize;
+                    }
+
+                    self.tile_data_low = vram[address + 2 * y];
                     self.state = FetcherState::TileDataHigh;
                 },
 
@@ -780,28 +867,55 @@ impl SpriteFetcher {
                     }
 
                     self.counter = 0;
-                    self.tile_data_high = vram[(self.tile_index as usize * TILE_SIZE_BYTES) + 1];
-                    self.state = FetcherState::Push;
-                },
+                    let address = self.tile_index as usize * TILE_SIZE_BYTES;
 
-                FetcherState::Push => {
+                    let mut y = (regs.lcd_y + TILE_SIZE_PIXELS * 2 - sprite.y) as usize;
+
+                    if sprite.flip_y() {
+                        y = (regs.lcd_control.sprite_size() - 1) as usize - y;
+                    }
+
+                    if regs.lcd_control.sprite_size() == TILE_SIZE_PIXELS * 2 {
+                        y %= TILE_SIZE_PIXELS as usize;
+                    }
+
+                    self.tile_data_high = vram[address + 2 * y + 1];
+
                     let start_index = if sprite.x < TILE_SIZE_PIXELS {
                         TILE_SIZE_PIXELS - sprite.x
-                    } else if !self.sprite_queue.is_empty() {
-                        TILE_SIZE_PIXELS - self.sprite_queue.len() as u8
+                    } else if let Some(prev_sprite) = self.prev_sprite {
+                        if sprite.x - prev_sprite.x < TILE_SIZE_PIXELS {
+                            while let Some(pixel) = self.sprite_queue.back().copied() {
+                                if pixel.color == ColorIndex::Zero {
+                                    self.sprite_queue.pop_back();
+                                } else {
+                                    break;
+                                }
+                            }
+                            self.sprite_queue.len() as u8
+                        }
+                        else {
+                            0
+                        }
                     } else {
                         0
                     };
 
-                    for bit in (start_index..TILE_SIZE_PIXELS).rev() {
+                    let range: Box<dyn Iterator<Item = u8>> = if sprite.flip_x() {
+                        Box::new(start_index..TILE_SIZE_PIXELS)
+                    } else {
+                        Box::new((start_index..TILE_SIZE_PIXELS).rev())
+                    };
+
+                    for bit in range {
                         let mask = 1 << bit;
                         let color_bit_low = (self.tile_data_low & mask) >> bit;
                         let color_bit_high = (self.tile_data_high & mask) >> bit;
                         let color = match (color_bit_high << 1) | color_bit_low {
-                            0 => PixelColor::Zero,
-                            1 => PixelColor::One,
-                            2 => PixelColor::Two,
-                            _ => PixelColor::Three
+                            0 => ColorIndex::Zero,
+                            1 => ColorIndex::One,
+                            2 => ColorIndex::Two,
+                            _ => ColorIndex::Three
                         };
 
                         let sprite_pixel = SpritePixel {
@@ -812,7 +926,13 @@ impl SpriteFetcher {
 
                         self.sprite_queue.push_back(sprite_pixel);
                     }
-                }
+
+                    self.prev_sprite = self.current_sprite;
+                    self.current_sprite = None;
+                    self.state = FetcherState::TileId;
+                },
+
+                FetcherState::Push => {}
             }
         }
     }
