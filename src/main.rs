@@ -7,11 +7,8 @@ use std::path::Path;
 use std::rc::Rc;
 
 use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::render::TextureAccess;
-
-use std::time::Duration;
 
 use emulator::{Emulator, EmulatorError};
 
@@ -54,16 +51,22 @@ fn main() -> Result<(), RugbError> {
         let sdl_context = sdl2::init().map_err(RugbError::SDL)?;
         let video_subsystem = sdl_context.video().map_err(RugbError::SDL)?;
 
-        let window = video_subsystem
+        let mut window = video_subsystem
             .window("demo", SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
             .position_centered()
+            .resizable()
             .build()
             .map_err(|e| RugbError::SDL(e.to_string()))?;
+
+        window.set_minimum_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32).map_err(|e| RugbError::SDL(e.to_string()))?;
 
         let mut canvas = window
             .into_canvas()
             .build()
             .map_err(|e| RugbError::SDL(e.to_string()))?;
+
+        canvas.set_draw_color(Color::BLACK);
+        canvas.set_logical_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32).map_err(|e| RugbError::SDL(e.to_string()))?;
 
         let texture_creator = canvas.texture_creator();
         let mut texture = texture_creator
@@ -74,10 +77,6 @@ fn main() -> Result<(), RugbError> {
                 SCREEN_HEIGHT as u32
             )
             .map_err(|e| RugbError::SDL(e.to_string()))?;
-
-        canvas.set_draw_color(Color::BLACK);
-        canvas.clear();
-        canvas.present();
 
         let mut event_pump = sdl_context.event_pump().map_err(RugbError::SDL)?;
         let mut tick_count = 0;
@@ -90,7 +89,7 @@ fn main() -> Result<(), RugbError> {
 
                 canvas.clear();
 
-                texture.with_lock(None, |pixels, pitch| {
+                texture.with_lock(None, |pixels, _pitch| {
                     pixels.copy_from_slice(lcd.borrow().as_slice());
                 }).map_err(RugbError::SDL)?;
 
