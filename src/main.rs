@@ -2,9 +2,7 @@ mod emulator;
 
 extern crate sdl2;
 
-use std::cell::RefCell;
 use std::path::Path;
-use std::rc::Rc;
 
 use sdl2::event::Event;
 use sdl2::pixels::{Color, PixelFormatEnum};
@@ -16,8 +14,6 @@ const FRAME_TIME: u32 = 70224;
 
 const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
-
-type FrameBuffer = Rc<RefCell<[u8; SCREEN_WIDTH * SCREEN_HEIGHT * 3]>>;
 
 #[derive(Debug)]
 enum RugbError {
@@ -44,8 +40,8 @@ fn main() -> Result<(), RugbError> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() == 2 {
-        let lcd = Rc::new(RefCell::new([0; SCREEN_WIDTH * SCREEN_HEIGHT * 3]));
-        let mut emulator = Emulator::new(Path::new(&args[1]), Rc::clone(&lcd)).map_err(RugbError::Emulator)?;
+        // let lcd = Rc::new(RefCell::new([0; SCREEN_WIDTH * SCREEN_HEIGHT * 3]));
+        let mut emulator = Emulator::new(Path::new(&args[1])).map_err(RugbError::Emulator)?;
 
         // SDL Setup
         let sdl_context = sdl2::init().map_err(RugbError::SDL)?;
@@ -90,7 +86,7 @@ fn main() -> Result<(), RugbError> {
                 canvas.clear();
 
                 texture.with_lock(None, |pixels, _pitch| {
-                    pixels.copy_from_slice(lcd.borrow().as_slice());
+                    pixels.copy_from_slice(emulator.frame_buffer().as_slice());
                 }).map_err(RugbError::SDL)?;
 
                 canvas.copy(&texture, None, None).map_err(RugbError::SDL)?;

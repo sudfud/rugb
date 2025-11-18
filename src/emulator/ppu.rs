@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{FrameBuffer, SCREEN_WIDTH, SCREEN_HEIGHT};
+use crate::{SCREEN_WIDTH, SCREEN_HEIGHT};
 
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0xA0;
@@ -21,6 +21,8 @@ const LIGHT_GRAY: (u8, u8, u8) = (192, 192, 192);
 const DARK_GRAY: (u8, u8, u8) = (96, 96, 96);
 const BLACK: (u8, u8, u8) = (0, 0, 0);
 
+pub(super) type FrameBuffer = [u8; SCREEN_WIDTH * SCREEN_HEIGHT * 3];
+
 pub(super) struct PPU {
     vram: [u8; VRAM_SIZE],
     oam: [u8; OAM_SIZE],
@@ -37,11 +39,11 @@ pub(super) struct PPU {
 }
 
 impl PPU {
-    pub(super) fn new(lcd: FrameBuffer) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             vram: [0; VRAM_SIZE],
             oam: [0; OAM_SIZE],
-            frame_buffer: lcd,
+            frame_buffer: [0; SCREEN_WIDTH * SCREEN_HEIGHT * 3],
             regs: Registers::new(),
             bg_fetcher: BackgroundFetcher::new(),
             sprite_fetcher: SpriteFetcher::new(),
@@ -52,6 +54,10 @@ impl PPU {
             interrupt: false,
             wy_latch: false
         }
+    }
+
+    pub(super) fn frame_buffer(&self) -> &FrameBuffer {
+        &self.frame_buffer
     }
 
     pub(super) fn read_vram(&self, address: u16) -> u8 {
@@ -327,9 +333,9 @@ impl PPU {
                                 let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
 
                                 // Place each RGB channel into the frame buffer
-                                self.frame_buffer.borrow_mut()[pixel_address] = r;
-                                self.frame_buffer.borrow_mut()[pixel_address + 1] = g;
-                                self.frame_buffer.borrow_mut()[pixel_address + 2] = b;
+                                self.frame_buffer[pixel_address] = r;
+                                self.frame_buffer[pixel_address + 1] = g;
+                                self.frame_buffer[pixel_address + 2] = b;
 
                                 self.regs.lcd_x += 1;
 

@@ -36,15 +36,6 @@ impl Registers {
         }
     }
 
-    pub(super) fn reset(&mut self) {
-        self.set_af(0x01B0);
-        self.set_bc(0x0013);
-        self.set_de(0x00D8);
-        self.set_hl(0x014D);
-        self.pc = 0x0100;
-        self.sp = 0xFFFE;
-    }
-
     pub(super) fn af(&self) -> u16 {
         u16::from_be_bytes([self.a, self.f])
     }
@@ -107,30 +98,6 @@ impl Registers {
         } else {
             self.f &= !(mask as u8);
         }
-    }
-
-    pub(super) fn inc_bc(&mut self) {
-        self.set_bc(self.bc().wrapping_add(1));
-    }
-
-    pub(super) fn dec_bc(&mut self) {
-        self.set_bc(self.bc().wrapping_sub(1));
-    }
-
-    pub(super) fn inc_de(&mut self) {
-        self.set_de(self.de().wrapping_add(1));
-    }
-
-    pub(super) fn dec_de(&mut self) {
-        self.set_de(self.de().wrapping_sub(1));
-    }
-
-    pub(super) fn inc_hl(&mut self) {
-        self.set_hl(self.hl().wrapping_add(1));
-    }
-
-    pub(super) fn dec_hl(&mut self) {
-        self.set_hl(self.hl().wrapping_sub(1));
     }
 
     pub(super) fn inc_pc(&mut self, count: u16) {

@@ -1,11 +1,8 @@
-mod mmu;
 mod registers;
 
-use crate::FrameBuffer;
+use super::{Bus};
+use super::interrupts::InterruptType;
 
-use super::Cartridge;
-
-use mmu::{Interrupt, MMU};
 use registers::{FlagMask, Registers};
 
 #[derive(Debug)]
@@ -28,7 +25,7 @@ impl std::fmt::Display for CPUError {
 
 pub(super) struct CPU {
     registers: Registers,
-    mmu: MMU,
+    // mmu: MMU,
     interrupt_master_enable: bool,
     ei_timer: u8,
     di_timer: u8,
@@ -36,10 +33,9 @@ pub(super) struct CPU {
 }
 
 impl CPU {
-    pub(super) fn new(cartridge: Cartridge, frame_buffer: FrameBuffer) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             registers: Registers::new(),
-            mmu: MMU::new(cartridge, frame_buffer),
             interrupt_master_enable: false,
             ei_timer: 0,
             di_timer: 0,
@@ -47,47 +43,31 @@ impl CPU {
         }
     }
 
-    pub(super) fn pc(&self) -> u16 {
-        self.registers.pc
-    }
-
-    pub(super) fn halted(&self) -> bool {
-        self.halted
-    }
-
-    pub(super) fn read(&self, address: u16) -> u8 {
-        self.mmu.read(address)
-    }
-
-    pub(super) fn write(&mut self, address: u16, value: u8) {
-        self.mmu.write(address, value);
-    }
-
-    pub(super) fn execute(&mut self) -> Result<u32, CPUError> {
+    pub(super) fn execute(&mut self, mut bus: Bus) -> Result<u32, CPUError> {
         self.update_ime();
 
-        if self.handle_interrupts() {
-            let tick_count = self.mmu.tick_count();
-            self.mmu.reset_tick_counter();
+        if self.handle_interrupts(&mut bus) {
+            let tick_count = bus.timer.tick_count();
+            bus.timer.reset_tick_count();
             return Ok(tick_count);
         }
 
         if self.halted {
-            self.mmu.cycle(4);
-            self.mmu.reset_tick_counter();
+            bus.cycle(4);
+            bus.timer.reset_tick_count();
             return Ok(4);
         }
 
-        self.step()?;
+        self.step(&mut bus)?;
 
-        let tick_count = self.mmu.tick_count();
-        self.mmu.reset_tick_counter();
+        let tick_count = bus.timer.tick_count();
+        bus.timer.reset_tick_count();
 
         Ok(tick_count)
     }
 
-    fn step(&mut self) -> Result<(), CPUError> {
-        let opcode = self.next_byte();
+    fn step(&mut self, bus: &mut Bus) -> Result<(), CPUError> {
+        let opcode = self.next_byte(bus);
 
         match opcode {
             // NOP
@@ -95,17 +75,17 @@ impl CPU {
 
             // LD BC, d16
             0x01 => {
-                let word = self.next_word();
+                let word = self.next_word(bus);
                 self.registers.set_bc(word);
             },
 
             // LD (BC), A
-            0x02 => self.mmu.write_cycle(self.registers.bc(), self.registers.a),
+            0x02 => bus.write_cycle(self.registers.bc(), self.registers.a),
 
             // INC BC
             0x03 => {
                 self.registers.set_bc(self.registers.bc().wrapping_add(1));
-                self.mmu.cycle(4);
+                bus.cycle(4);
             }
 
             // INC B
@@ -116,7 +96,7 @@ impl CPU {
 
             // LD B, d8
             0x06 => {
-                let byte = self.next_byte();
+                let byte = self.next_byte(bus);
                 self.registers.b = byte;
             },
 
@@ -125,23 +105,23 @@ impl CPU {
 
             // LD (a16), SP
             0x08 => {
-                let address = self.next_word();
+                let address = self.next_word(bus);
                 let [lower, upper] = self.registers.sp.to_le_bytes();
 
-                self.mmu.write_cycle(address, lower);
-                self.mmu.write_cycle(address.wrapping_add(1), upper);
+                bus.write_cycle(address, lower);
+                bus.write_cycle(address.wrapping_add(1), upper);
             },
 
             // ADD HL, BC
-            0x09 => self.add_to_hl(self.registers.bc()),
+            0x09 => self.add_to_hl(bus, self.registers.bc()),
 
             // LD A, (BC)
-            0x0A => self.registers.a = self.mmu.read_cycle(self.registers.bc()),
+            0x0A => self.registers.a = bus.read_cycle(self.registers.bc()),
 
             // DEC BC
             0x0B => {
                 self.registers.set_bc(self.registers.bc().wrapping_sub(1));
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // INC C
@@ -152,7 +132,7 @@ impl CPU {
 
             // LD C, d8
             0x0E => {
-                let byte = self.next_byte();
+                let byte = self.next_byte(bus);
                 self.registers.c = byte;
             },
 
@@ -164,17 +144,17 @@ impl CPU {
 
             // LD DE, d16
             0x11 => {
-                let word = self.next_word();
+                let word = self.next_word(bus);
                 self.registers.set_de(word);
             },
 
             // LD (DE), A
-            0x12 => self.mmu.write_cycle(self.registers.de(), self.registers.a),
+            0x12 => bus.write_cycle(self.registers.de(), self.registers.a),
 
             // INC DE
             0x13 => {
                 self.registers.set_de(self.registers.de().wrapping_add(1));
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // INC D
@@ -185,7 +165,7 @@ impl CPU {
 
             // LD D, d8
             0x16 => {
-                let byte = self.next_byte();
+                let byte = self.next_byte(bus);
                 self.registers.d = byte;
             },
 
@@ -193,18 +173,18 @@ impl CPU {
             0x17 => self.registers.a = self.rotate_left(self.registers.a, true, false),
 
             // JR s8
-            0x18 => self.jump_relative(Condition::None),
+            0x18 => self.jump_relative(bus, Condition::None),
 
             // ADD HL, DE
-            0x19 => self.add_to_hl(self.registers.de()),
+            0x19 => self.add_to_hl(bus, self.registers.de()),
 
             // LD A, (DE)
-            0x1A => self.registers.a = self.mmu.read_cycle(self.registers.de()),
+            0x1A => self.registers.a = bus.read_cycle(self.registers.de()),
 
             // DEC DE
             0x1B => {
                 self.registers.set_de(self.registers.de().wrapping_sub(1));
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // INC E
@@ -215,7 +195,7 @@ impl CPU {
 
             // LD E, d8
             0x1E => {
-                let byte = self.next_byte();
+                let byte = self.next_byte(bus);
                 self.registers.e = byte;
             },
 
@@ -223,24 +203,24 @@ impl CPU {
             0x1F => self.registers.a = self.rotate_right(self.registers.a, true, false),
 
             // JR NZ, s8
-            0x20 => self.jump_relative(Condition::NotZero),
+            0x20 => self.jump_relative(bus, Condition::NotZero),
 
             // LD HL, d16
             0x21 => {
-                let word = self.next_word();
+                let word = self.next_word(bus);
                 self.registers.set_hl(word);
             },
 
             // LD (HL+), A
             0x22 => {
                 let address = self.registers.hli();
-                self.mmu.write_cycle(address, self.registers.a);
+                bus.write_cycle(address, self.registers.a);
             },
 
             // INC HL
             0x23 => {
                 self.registers.set_hl(self.registers.hl().wrapping_add(1));
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // INC H
@@ -251,7 +231,7 @@ impl CPU {
 
             // LD H, d8
             0x26 => {
-                let byte = self.next_byte();
+                let byte = self.next_byte(bus);
                 self.registers.h = byte;
             },
 
@@ -287,21 +267,21 @@ impl CPU {
             },
 
             // JR Z, s8
-            0x28 => self.jump_relative(Condition::Zero),
+            0x28 => self.jump_relative(bus, Condition::Zero),
 
             // ADD HL, HL
-            0x29 => self.add_to_hl(self.registers.hl()),
+            0x29 => self.add_to_hl(bus, self.registers.hl()),
 
             // LD A, (HL+)
             0x2A => {
                 let address = self.registers.hli();
-                self.registers.a = self.mmu.read_cycle(address);
+                self.registers.a = bus.read_cycle(address);
             },
 
             // DEC HL
             0x2B => {
                 self.registers.set_hl(self.registers.hl().wrapping_sub(1));
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // INC L
@@ -312,7 +292,7 @@ impl CPU {
 
             // LD L, d8
             0x2E => {
-                let byte = self.next_byte();
+                let byte = self.next_byte(bus);
                 self.registers.l = byte;
             },
 
@@ -324,41 +304,41 @@ impl CPU {
             },
 
             // JR NC, s8
-            0x30 => self.jump_relative(Condition::NotCarry),
+            0x30 => self.jump_relative(bus, Condition::NotCarry),
 
             // LD SP, d16
-            0x31 => self.registers.sp = self.next_word(),
+            0x31 => self.registers.sp = self.next_word(bus),
 
             // LD (HL-), A
             0x32 => {
                 let address = self.registers.hld();
-                self.mmu.write_cycle(address, self.registers.a);
+                bus.write_cycle(address, self.registers.a);
             },
 
             // INC SP
             0x33 => {
                 self.registers.sp = self.registers.sp.wrapping_add(1);
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // INC (HL)
             0x34 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.inc_8(byte);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // DEC (HL)
             0x35 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.dec_8(byte);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // LD (HL), d8
             0x36 => {
-                let byte = self.next_byte();
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                let byte = self.next_byte(bus);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SCF
@@ -369,21 +349,21 @@ impl CPU {
             },
 
             // JR C, s8
-            0x38 => self.jump_relative(Condition::Carry),
+            0x38 => self.jump_relative(bus, Condition::Carry),
 
             // ADD HL, SP
-            0x39 => self.add_to_hl(self.registers.sp),
+            0x39 => self.add_to_hl(bus, self.registers.sp),
 
             // LD A, (HL-)
             0x3A => {
                 let address = self.registers.hld();
-                self.registers.a = self.mmu.read_cycle(address);
+                self.registers.a = bus.read_cycle(address);
             },
 
             // DEC SP
             0x3B => {
                 self.registers.sp = self.registers.sp.wrapping_sub(1);
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // INC A
@@ -394,7 +374,7 @@ impl CPU {
 
             // LD A, d8
             0x3E => {
-                let byte = self.next_byte();
+                let byte = self.next_byte(bus);
                 self.registers.a = byte;
             },
 
@@ -424,7 +404,7 @@ impl CPU {
             0x45 => self.registers.b = self.registers.l,
 
             // LD B, (HL)
-            0x46 => self.registers.b = self.mmu.read_cycle(self.registers.hl()),
+            0x46 => self.registers.b = bus.read_cycle(self.registers.hl()),
 
             // LD B, A
             0x47 => self.registers.b = self.registers.a,
@@ -448,7 +428,7 @@ impl CPU {
             0x4D => self.registers.c = self.registers.l,
 
             // LD C, (HL)
-            0x4E => self.registers.c = self.mmu.read_cycle(self.registers.hl()),
+            0x4E => self.registers.c = bus.read_cycle(self.registers.hl()),
 
             // LD C, A
             0x4F => self.registers.c = self.registers.a,
@@ -472,7 +452,7 @@ impl CPU {
             0x55 => self.registers.d = self.registers.l,
 
             // LD D, (HL)
-            0x56 => self.registers.d = self.mmu.read_cycle(self.registers.hl()),
+            0x56 => self.registers.d = bus.read_cycle(self.registers.hl()),
 
             // LD D, A
             0x57 => self.registers.d = self.registers.a,
@@ -496,7 +476,7 @@ impl CPU {
             0x5D => self.registers.e = self.registers.l,
 
             // LD E, (HL)
-            0x5E => self.registers.e = self.mmu.read_cycle(self.registers.hl()),
+            0x5E => self.registers.e = bus.read_cycle(self.registers.hl()),
 
             // LD E, A
             0x5F => self.registers.e = self.registers.a,
@@ -520,7 +500,7 @@ impl CPU {
             0x65 => self.registers.h = self.registers.l,
 
             // LD H, (HL)
-            0x66 => self.registers.h = self.mmu.read_cycle(self.registers.hl()),
+            0x66 => self.registers.h = bus.read_cycle(self.registers.hl()),
 
             // LD H, A
             0x67 => self.registers.h = self.registers.a,
@@ -544,34 +524,34 @@ impl CPU {
             0x6D => self.registers.l = self.registers.l,
 
             // LD L, (HL)
-            0x6E => self.registers.l = self.mmu.read_cycle(self.registers.hl()),
+            0x6E => self.registers.l = bus.read_cycle(self.registers.hl()),
 
             // LD L, A
             0x6F => self.registers.l = self.registers.a,
 
             // LD (HL), B
-            0x70 => self.mmu.write_cycle(self.registers.hl(), self.registers.b),
+            0x70 => bus.write_cycle(self.registers.hl(), self.registers.b),
 
             // LD (HL), C
-            0x71 => self.mmu.write_cycle(self.registers.hl(), self.registers.c),
+            0x71 => bus.write_cycle(self.registers.hl(), self.registers.c),
 
             // LD (HL), D
-            0x72 => self.mmu.write_cycle(self.registers.hl(), self.registers.d),
+            0x72 => bus.write_cycle(self.registers.hl(), self.registers.d),
 
             // LD (HL), E
-            0x73 => self.mmu.write_cycle(self.registers.hl(), self.registers.e),
+            0x73 => bus.write_cycle(self.registers.hl(), self.registers.e),
 
             // LD (HL), H
-            0x74 => self.mmu.write_cycle(self.registers.hl(), self.registers.h),
+            0x74 => bus.write_cycle(self.registers.hl(), self.registers.h),
 
             // LD (HL), L
-            0x75 => self.mmu.write_cycle(self.registers.hl(), self.registers.l),
+            0x75 => bus.write_cycle(self.registers.hl(), self.registers.l),
 
             // HALT
             0x76 => self.halted = true,
 
             // LD (HL), A
-            0x77 => self.mmu.write_cycle(self.registers.hl(), self.registers.a),
+            0x77 => bus.write_cycle(self.registers.hl(), self.registers.a),
 
             // LD A, B
             0x78 => self.registers.a = self.registers.b,
@@ -592,7 +572,7 @@ impl CPU {
             0x7D => self.registers.a = self.registers.l,
 
             // LD A, (HL)
-            0x7E => self.registers.a = self.mmu.read_cycle(self.registers.hl()),
+            0x7E => self.registers.a = bus.read_cycle(self.registers.hl()),
 
             // LD A, A
             0x7F => self.registers.a = self.registers.a,
@@ -617,7 +597,7 @@ impl CPU {
 
             // ADD A, (HL)
             0x86 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.add_a(byte, false);
             },
 
@@ -644,7 +624,7 @@ impl CPU {
 
             // ADC A, (HL)
             0x8E => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.add_a(byte, true);
             },
 
@@ -671,7 +651,7 @@ impl CPU {
 
             // SUB A, (HL)
             0x96 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.sub_a(byte, false);
             },
 
@@ -698,7 +678,7 @@ impl CPU {
 
             // SBC A, (HL)
             0x9E => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.sub_a(byte, true);
             },
 
@@ -725,7 +705,7 @@ impl CPU {
 
             // AND A, (HL)
             0xA6 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.and_a(byte);
             },
 
@@ -752,7 +732,7 @@ impl CPU {
 
             // XOR A, (HL)
             0xAE => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.xor_a(byte);
             },
 
@@ -779,7 +759,7 @@ impl CPU {
 
             // OR A, (HL)
             0xB6 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.or_a(byte);
             },
 
@@ -806,7 +786,7 @@ impl CPU {
 
             // CP A, (HL)
             0xBE => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.cp_a(byte);
             },
 
@@ -814,147 +794,147 @@ impl CPU {
             0xBF => self.cp_a(self.registers.a),
 
             // RET NZ
-            0xC0 => self.ret(Condition::NotZero),
+            0xC0 => self.ret(bus, Condition::NotZero),
 
             // POP BC
             0xC1 => {
-                let word = self.pop_stack();
+                let word = self.pop_stack(bus);
                 self.registers.set_bc(word);
             },
 
             // JP NZ, a16
-            0xC2 => self.jump(Condition::NotZero),
+            0xC2 => self.jump(bus, Condition::NotZero),
 
             // JP a16
-            0xC3 => self.jump(Condition::None),
+            0xC3 => self.jump(bus, Condition::None),
 
             // CALL NZ, a16
-            0xC4 => self.call(Condition::NotZero),
+            0xC4 => self.call(bus, Condition::NotZero),
 
             // PUSH BC
-            0xC5 => self.push_stack(self.registers.bc()),
+            0xC5 => self.push_stack(bus, self.registers.bc()),
 
             // ADD A, d8
             0xC6 => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.add_a(value, false);
             },
 
             // RST 0
-            0xC7 => self.rst(0x0000),
+            0xC7 => self.rst(bus, 0x0000),
 
             // RET Z
-            0xC8 => self.ret(Condition::Zero),
+            0xC8 => self.ret(bus, Condition::Zero),
 
             // RET
-            0xC9 => self.ret(Condition::None),
+            0xC9 => self.ret(bus, Condition::None),
 
             // JP Z, a16
-            0xCA => self.jump(Condition::Zero),
+            0xCA => self.jump(bus, Condition::Zero),
 
             // CB
-            0xCB => self.step_cb(),
+            0xCB => self.step_cb(bus),
 
             // CALL Z, a16
-            0xCC => self.call(Condition::Zero),
+            0xCC => self.call(bus, Condition::Zero),
 
             // CALL a16
-            0xCD => self.call(Condition::None),
+            0xCD => self.call(bus, Condition::None),
 
             // ADC A, d8
             0xCE => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.add_a(value, true);
             },
 
             // RST 1
-            0xCF => self.rst(0x0008),
+            0xCF => self.rst(bus, 0x0008),
 
             // RET NC
-            0xD0 => self.ret(Condition::NotCarry),
+            0xD0 => self.ret(bus, Condition::NotCarry),
 
             // POP DE
             0xD1 => {
-                let word = self.pop_stack();
+                let word = self.pop_stack(bus);
                 self.registers.set_de(word);
             },
 
             // JP NC, a16
-            0xD2 => self.jump(Condition::NotCarry),
+            0xD2 => self.jump(bus, Condition::NotCarry),
 
             // CALL NC, a16
-            0xD4 => self.call(Condition::NotCarry),
+            0xD4 => self.call(bus, Condition::NotCarry),
 
             // PUSH DE
-            0xD5 => self.push_stack(self.registers.de()),
+            0xD5 => self.push_stack(bus, self.registers.de()),
 
             // SUB A, d8
             0xD6 => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.sub_a(value, false);
             },
 
             // RST 2
-            0xD7 => self.rst(0x0010),
+            0xD7 => self.rst(bus, 0x0010),
 
             // RET C
-            0xD8 => self.ret(Condition::Carry),
+            0xD8 => self.ret(bus, Condition::Carry),
 
             // RETI
             0xD9 => {
                 self.ei_timer = 1;
-                self.ret(Condition::None);
+                self.ret(bus, Condition::None);
             },
 
             // JP C, a16
-            0xDA => self.jump(Condition::Carry),
+            0xDA => self.jump(bus, Condition::Carry),
 
             // CALL C, a16
-            0xDC => self.call(Condition::Carry),
+            0xDC => self.call(bus, Condition::Carry),
 
             // SBC A, d8
             0xDE => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.sub_a(value, true);
             },
 
             // RST 3
-            0xDF => self.rst(0x0018),
+            0xDF => self.rst(bus, 0x0018),
 
             // LD (a8), A
             0xE0 => {
-                let address = 0xFF00 | self.next_byte() as u16;
-                self.mmu.write_cycle(address, self.registers.a);
+                let address = 0xFF00 | self.next_byte(bus) as u16;
+                bus.write_cycle(address, self.registers.a);
             },
 
             // POP HL
             0xE1 => {
-                let word = self.pop_stack();
+                let word = self.pop_stack(bus);
                 self.registers.set_hl(word);
             },
 
             // LD (C), A
             0xE2 => {
                 let address = 0xFF00 | self.registers.c as u16;
-                self.mmu.write_cycle(address, self.registers.a);
+                bus.write_cycle(address, self.registers.a);
             },
 
             // PUSH HL
-            0xE5 => self.push_stack(self.registers.hl()),
+            0xE5 => self.push_stack(bus, self.registers.hl()),
 
             // AND A, d8
             0xE6 => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.and_a(value);
             },
 
             // RST 4
-            0xE7 => self.rst(0x0020),
+            0xE7 => self.rst(bus, 0x0020),
 
             // ADD SP, s8
             0xE8 => {
                 let sp = self.registers.sp;
-                let offset = self.next_byte() as i8 as i16 as u16;
+                let offset = self.next_byte(bus) as i8 as i16 as u16;
 
                 self.registers.set_flag(FlagMask::Zero, false);
                 self.registers.set_flag(FlagMask::Subtract, false);
@@ -963,7 +943,7 @@ impl CPU {
 
                 self.registers.sp = sp.wrapping_add(offset);
 
-                self.mmu.cycle(8);
+                bus.cycle(8);
             },
 
             // JP HL
@@ -971,56 +951,56 @@ impl CPU {
 
             // LD (a16), A
             0xEA => {
-                let address = self.next_word();
-                self.mmu.write_cycle(address, self.registers.a);
+                let address = self.next_word(bus);
+                bus.write_cycle(address, self.registers.a);
             },
 
             // XOR A, d8
             0xEE => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.xor_a(value);
             },
 
             // RST 5
-            0xEF => self.rst(0x0028),
+            0xEF => self.rst(bus, 0x0028),
 
             // LD A, (a8)
             0xF0 => {
-                let address = 0xFF00 | self.next_byte() as u16;
-                self.registers.a = self.mmu.read_cycle(address);
+                let address = 0xFF00 | self.next_byte(bus) as u16;
+                self.registers.a = bus.read_cycle(address);
             },
 
             // POP AF
             0xF1 => {
-                let word = self.pop_stack();
+                let word = self.pop_stack(bus);
                 self.registers.set_af(word);
             },
 
             // LD A, (C)
             0xF2 => {
                 let address = 0xFF00 | self.registers.c as u16;
-                self.registers.a = self.mmu.read_cycle(address);
+                self.registers.a = bus.read_cycle(address);
             },
 
             // DI
             0xF3 => self.di_timer = 1,
 
             // PUSH AF
-            0xF5 => self.push_stack(self.registers.af()),
+            0xF5 => self.push_stack(bus, self.registers.af()),
 
             // OR A, d8
             0xF6 => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.or_a(value);
             },
 
             // RST 6
-            0xF7 => self.rst(0x0030),
+            0xF7 => self.rst(bus, 0x0030),
 
             // LD HL, SP+s8
             0xF8 => {
                 let sp = self.registers.sp;
-                let offset = self.next_byte() as i8 as i16 as u16;
+                let offset = self.next_byte(bus) as i8 as i16 as u16;
 
                 self.registers.set_flag(FlagMask::Zero, false);
                 self.registers.set_flag(FlagMask::Subtract, false);
@@ -1029,19 +1009,19 @@ impl CPU {
 
                 self.registers.set_hl(sp.wrapping_add(offset));
 
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // LD SP, HL
             0xF9 => {
                 self.registers.sp = self.registers.hl();
-                self.mmu.cycle(4);
+                bus.cycle(4);
             },
 
             // LD A, (a16)
             0xFA => {
-                let address = self.next_word();
-                self.registers.a = self.mmu.read_cycle(address);
+                let address = self.next_word(bus);
+                self.registers.a = bus.read_cycle(address);
             }
 
             // EI
@@ -1049,12 +1029,12 @@ impl CPU {
 
             // CP A, d8
             0xFE => {
-                let value = self.next_byte();
+                let value = self.next_byte(bus);
                 self.cp_a(value);
             },
 
             // RST 7
-            0xFF => self.rst(0x0038),
+            0xFF => self.rst(bus, 0x0038),
 
             _ => return Err(CPUError::UnsupportedOpcode(opcode, self.registers.pc)),
         }
@@ -1062,8 +1042,8 @@ impl CPU {
         Ok(())
     }
 
-    fn step_cb(&mut self) {
-        let cb_opcode = self.next_byte();
+    fn step_cb(&mut self, bus: &mut Bus) {
+        let cb_opcode = self.next_byte(bus);
 
         match cb_opcode {
             // RLC B
@@ -1086,9 +1066,9 @@ impl CPU {
 
             // RLC (HL)
             0x06 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.rotate_left(byte, false, true);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RLC A
@@ -1114,9 +1094,9 @@ impl CPU {
 
             // RRC (HL)
             0x0E => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.rotate_right(byte, false, true);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RRC A
@@ -1142,9 +1122,9 @@ impl CPU {
 
             // RL (HL)
             0x16 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.rotate_left(byte, true, true);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RL A
@@ -1170,9 +1150,9 @@ impl CPU {
 
             // RR (HL)
             0x1E => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.rotate_right(byte, true, true);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RR A
@@ -1198,9 +1178,9 @@ impl CPU {
 
             // SLA (HL)
             0x26 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.shift_left_arithmetic(byte);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SLA A
@@ -1226,9 +1206,9 @@ impl CPU {
 
             // SRA (HL)
             0x2E => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.shift_right_arithmetic(byte);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SRA A
@@ -1254,9 +1234,9 @@ impl CPU {
 
             // SWAP (HL)
             0x36 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.swap(byte);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SWAP A
@@ -1282,9 +1262,9 @@ impl CPU {
 
             // SRL (HL)
             0x3E => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.shift_right_logical(byte);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SRL A
@@ -1310,7 +1290,7 @@ impl CPU {
 
             // BIT 0, (HL)
             0x46 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 0);
             },
 
@@ -1337,7 +1317,7 @@ impl CPU {
 
             // BIT 1, (HL)
             0x4E => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 1);
             },
 
@@ -1364,7 +1344,7 @@ impl CPU {
 
             // BIT 2, (HL)
             0x56 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 2);
             },
 
@@ -1391,7 +1371,7 @@ impl CPU {
 
             // BIT 3, (HL)
             0x5E => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 3);
             },
 
@@ -1418,7 +1398,7 @@ impl CPU {
 
             // BIT 4, (HL)
             0x66 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 4);
             },
 
@@ -1445,7 +1425,7 @@ impl CPU {
 
             // BIT 5, (HL)
             0x6E => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 5);
             },
 
@@ -1472,7 +1452,7 @@ impl CPU {
 
             // BIT 6, (HL)
             0x76 => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 6);
             },
 
@@ -1499,7 +1479,7 @@ impl CPU {
 
             // BIT 7, (HL)
             0x7E => {
-                let byte = self.mmu.read_cycle(self.registers.hl());
+                let byte = bus.read_cycle(self.registers.hl());
                 self.bit_test(byte, 7);
             },
 
@@ -1526,9 +1506,9 @@ impl CPU {
 
             // RES 0, (HL)
             0x86 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 0);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 0, A
@@ -1554,9 +1534,9 @@ impl CPU {
 
             // RES 1, (HL)
             0x8E => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 1);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 1, A
@@ -1582,9 +1562,9 @@ impl CPU {
 
             // RES 2, (HL)
             0x96 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 2);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 2, A
@@ -1610,9 +1590,9 @@ impl CPU {
 
             // RES 3, (HL)
             0x9E => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 3);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 3, A
@@ -1638,9 +1618,9 @@ impl CPU {
 
             // RES 4, (HL)
             0xA6 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 4);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 4, A
@@ -1666,9 +1646,9 @@ impl CPU {
 
             // RES 5, (HL)
             0xAE => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 5);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 5, A
@@ -1694,9 +1674,9 @@ impl CPU {
 
             // RES 6, (HL)
             0xB6 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 6);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 6, A
@@ -1722,9 +1702,9 @@ impl CPU {
 
             // RES 7, (HL)
             0xBE => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_reset(byte, 7);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // RES 7, A
@@ -1750,9 +1730,9 @@ impl CPU {
 
             // SET 0, (HL)
             0xC6 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 0);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 0, A
@@ -1778,9 +1758,9 @@ impl CPU {
 
             // SET 1, (HL)
             0xCE => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 1);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 1, A
@@ -1806,9 +1786,9 @@ impl CPU {
 
             // SET 2, (HL)
             0xD6 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 2);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 2, A
@@ -1834,9 +1814,9 @@ impl CPU {
 
             // SET 3, (HL)
             0xDE => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 3);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 3, A
@@ -1862,9 +1842,9 @@ impl CPU {
 
             // SET 4, (HL)
             0xE6 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 4);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 4, A
@@ -1890,9 +1870,9 @@ impl CPU {
 
             // SET 5, (HL)
             0xEE => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 5);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 5, A
@@ -1918,9 +1898,9 @@ impl CPU {
 
             // SET 6, (HL)
             0xF6 => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 6);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 6, A
@@ -1946,9 +1926,9 @@ impl CPU {
 
             // SET 7, (HL)
             0xFE => {
-                let mut byte = self.mmu.read_cycle(self.registers.hl());
+                let mut byte = bus.read_cycle(self.registers.hl());
                 byte = self.bit_set(byte, 7);
-                self.mmu.write_cycle(self.registers.hl(), byte);
+                bus.write_cycle(self.registers.hl(), byte);
             },
 
             // SET 7, A
@@ -1956,7 +1936,7 @@ impl CPU {
         }
     }
 
-    fn add_to_hl(&mut self, value: u16) {
+    fn add_to_hl(&mut self, bus: &mut Bus, value: u16) {
         let hl = self.registers.hl();
         let sum = hl.wrapping_add(value);
 
@@ -1965,7 +1945,7 @@ impl CPU {
         self.registers.set_flag(FlagMask::Carry, hl > 0xFFFF - value);
         self.registers.set_hl(sum);
 
-        self.mmu.cycle(4);
+        bus.cycle(4);
     }
 
     fn inc_8(&mut self, value: u8) -> u8 {
@@ -2027,21 +2007,21 @@ impl CPU {
         rot
     }
 
-    fn jump_relative(&mut self, condition: Condition) {
-        let jump = (self.next_byte() as i8) as i16;
+    fn jump_relative(&mut self, bus: &mut Bus, condition: Condition) {
+        let jump = (self.next_byte(bus) as i8) as i16;
 
         if self.evaluate(condition) {
             self.registers.pc = self.registers.pc.wrapping_add_signed(jump);
-            self.mmu.cycle(4);
+            bus.cycle(4);
         }
     }
 
-    fn jump(&mut self, condition: Condition) {
-        let jump = self.next_word();
+    fn jump(&mut self, bus: &mut Bus, condition: Condition) {
+        let jump = self.next_word(bus);
 
         if self.evaluate(condition) {
             self.registers.pc = jump;
-            self.mmu.cycle(4);
+            bus.cycle(4);
         }
     }
 
@@ -2112,32 +2092,32 @@ impl CPU {
         self.registers.a = a;
     }
 
-    fn call(&mut self, condition: Condition) {
-        let jump = self.next_word();
+    fn call(&mut self, bus: &mut Bus, condition: Condition) {
+        let jump = self.next_word(bus);
 
         if self.evaluate(condition) {
             let address = self.registers.pc;
-            self.push_stack(address);
+            self.push_stack(bus, address);
             self.registers.pc = jump;
         }
     }
 
-    fn ret(&mut self, condition: Condition) {
+    fn ret(&mut self, bus: &mut Bus, condition: Condition) {
         if self.evaluate(condition) {
             if condition != Condition::None {
-                self.mmu.cycle(4);
+                bus.cycle(4);
             }
 
-            self.registers.pc = self.pop_stack();
-            self.mmu.cycle(4);
+            self.registers.pc = self.pop_stack(bus);
+            bus.cycle(4);
             return;
         }
 
-        self.mmu.cycle(4);
+        bus.cycle(4);
     }
 
-    fn rst(&mut self, address: u16) {
-        self.push_stack(self.registers.pc);
+    fn rst(&mut self, bus: &mut Bus, address: u16) {
+        self.push_stack(bus, self.registers.pc);
         self.registers.pc = address;
     }
 
@@ -2207,38 +2187,38 @@ impl CPU {
         value | mask
     }
 
-    fn pop_stack(&mut self) -> u16 {
-        let lower = self.mmu.read_cycle(self.registers.sp);
+    fn pop_stack(&mut self, bus: &mut Bus) -> u16 {
+        let lower = bus.read_cycle(self.registers.sp);
         self.registers.inc_sp();
-        let upper = self.mmu.read_cycle(self.registers.sp);
+        let upper = bus.read_cycle(self.registers.sp);
         self.registers.inc_sp();
 
         u16::from_le_bytes([lower, upper])
     }
 
-    fn push_stack(&mut self, value: u16) {
+    fn push_stack(&mut self, bus: &mut Bus, value: u16) {
         let [upper, lower] = value.to_be_bytes();
 
-        self.mmu.cycle(4);
+        bus.cycle(4);
 
         self.registers.dec_sp();
-        self.mmu.write_cycle(self.registers.sp, upper);
+        bus.write_cycle(self.registers.sp, upper);
         self.registers.dec_sp();
-        self.mmu.write_cycle(self.registers.sp, lower);
+        bus.write_cycle(self.registers.sp, lower);
     }
 
-    fn next_byte(&mut self) -> u8 {
-        let byte = self.mmu.read_cycle(self.registers.pc);
+    fn next_byte(&mut self, bus: &mut Bus) -> u8 {
+        let byte = bus.read_cycle(self.registers.pc);
 
         self.registers.inc_pc(1);
 
         byte
     }
 
-    fn next_word(&mut self) -> u16 {
+    fn next_word(&mut self, bus: &mut Bus) -> u16 {
         let bytes = [
-            self.mmu.read_cycle(self.registers.pc),
-            self.mmu.read_cycle(self.registers.pc.wrapping_add(1)),
+            bus.read_cycle(self.registers.pc),
+            bus.read_cycle(self.registers.pc.wrapping_add(1)),
         ];
 
         self.registers.inc_pc(2);
@@ -2276,47 +2256,47 @@ impl CPU {
         };
     }
 
-    fn handle_interrupts(&mut self) -> bool {
-        if self.mmu.interrupt_enabled() {
+    fn handle_interrupts(&mut self, bus: &mut Bus) -> bool {
+        if bus.interrupts.interrupt_enabled() {
             self.halted = false;
 
             if self.interrupt_master_enable {
                 self.interrupt_master_enable = false;
 
-                self.mmu.cycle(8);
+                bus.cycle(8);
 
-                if self.mmu.interrupt_flag(Interrupt::VBlank) {
-                    self.push_stack(self.registers.pc);
+                if bus.interrupts.interrupt_flag(InterruptType::VBlank) {
+                    self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0040;
-                    self.mmu.unflag_interrupt(Interrupt::VBlank);
+                    bus.interrupts.unflag_interrupt(InterruptType::VBlank);
                     return true;
                 }
 
-                if self.mmu.interrupt_flag(Interrupt::LCD) {
-                    self.push_stack(self.registers.pc);
+                if bus.interrupts.interrupt_flag(InterruptType::LCD) {
+                    self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0048;
-                    self.mmu.unflag_interrupt(Interrupt::LCD);
+                    bus.interrupts.unflag_interrupt(InterruptType::LCD);
                     return true;
                 }
 
-                if self.mmu.interrupt_flag(Interrupt::Timer) {
-                    self.push_stack(self.registers.pc);
+                if bus.interrupts.interrupt_flag(InterruptType::Timer) {
+                    self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0050;
-                    self.mmu.unflag_interrupt(Interrupt::Timer);
+                    bus.interrupts.unflag_interrupt(InterruptType::Timer);
                     return true;
                 }
 
-                if self.mmu.interrupt_flag(Interrupt::Serial) {
-                    self.push_stack(self.registers.pc);
+                if bus.interrupts.interrupt_flag(InterruptType::Serial) {
+                    self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0058;
-                    self.mmu.unflag_interrupt(Interrupt::Serial);
+                    bus.interrupts.unflag_interrupt(InterruptType::Serial);
                     return true;
                 }
 
-                if self.mmu.interrupt_flag(Interrupt::Joypad) {
-                    self.push_stack(self.registers.pc);
+                if bus.interrupts.interrupt_flag(InterruptType::Joypad) {
+                    self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0060;
-                    self.mmu.unflag_interrupt(Interrupt::Joypad);
+                    bus.interrupts.unflag_interrupt(InterruptType::Joypad);
                     return true;
                 }
             }
@@ -2326,28 +2306,28 @@ impl CPU {
     }
 }
 
-impl std::fmt::Display for CPU {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}",
-            self.registers.a,
-            self.registers.f,
-            self.registers.b,
-            self.registers.c,
-            self.registers.d,
-            self.registers.e,
-            self.registers.h,
-            self.registers.l,
-            self.registers.sp,
-            self.registers.pc,
-            self.read(self.registers.pc),
-            self.read(self.registers.pc.wrapping_add(1)),
-            self.read(self.registers.pc.wrapping_add(2)),
-            self.read(self.registers.pc.wrapping_add(3))
-        )
-    }
-}
+// impl std::fmt::Display for CPU {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(
+//             f,
+//             "A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}",
+//             self.registers.a,
+//             self.registers.f,
+//             self.registers.b,
+//             self.registers.c,
+//             self.registers.d,
+//             self.registers.e,
+//             self.registers.h,
+//             self.registers.l,
+//             self.registers.sp,
+//             self.registers.pc,
+//             self.read(self.registers.pc),
+//             self.read(self.registers.pc.wrapping_add(1)),
+//             self.read(self.registers.pc.wrapping_add(2)),
+//             self.read(self.registers.pc.wrapping_add(3))
+//         )
+//     }
+// }
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]

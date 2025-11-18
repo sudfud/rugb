@@ -1,18 +1,5 @@
-mod ppu;
-mod joypad;
-mod serial;
-mod timer;
-
-use crate::FrameBuffer;
-use crate::emulator::cartridge::Cartridge;
-
-use ppu::PPU;
-use joypad::Joypad;
-use serial::Serial;
-use timer::Timer;
-
-const WRAM_SIZE: usize = 0x2000;
-const HRAM_SIZE: usize = 0x7F;
+use super::{Cartridge, HRAM, Interrupts, Joypad, PPU, Serial, Timer, WRAM};
+use super::interrupts::InterruptType;
 
 const ROM_START: u16 = 0x0000;
 const VRAM_START: u16 = 0x8000;
@@ -49,53 +36,18 @@ const REG_WX: u16 = 0xFF4B;
 
 const REG_IE: u16 = 0xFFFF;
 
-#[repr(u8)]
-#[derive(Clone, Copy)]
-pub(super) enum Interrupt {
-    VBlank = 0b0000_0001,
-    LCD = 0b0000_0010,
-    Timer = 0b0000_0100,
-    Serial = 0b0000_1000,
-    Joypad = 0b0001_0000
+pub(super) struct Bus<'a> {
+    pub(super) cartridge: &'a mut Cartridge,
+    pub(super) hram: &'a mut HRAM,
+    pub(super) interrupts: &'a mut Interrupts,
+    pub(super) joypad: &'a mut Joypad,
+    pub(super) ppu: &'a mut PPU,
+    pub(super) serial: &'a mut Serial,
+    pub(super) timer: &'a mut Timer,
+    pub(super) wram: &'a mut WRAM
 }
 
-pub(super) struct MMU {
-    cartridge: Cartridge,
-    ppu: PPU,
-    wram: [u8; WRAM_SIZE],
-    hram: [u8; HRAM_SIZE],
-    joypad: Joypad,
-    serial: Serial,
-    pub timer: Timer,
-    interrupt_enable: u8,
-    interrupt_flag: u8,
-    tick_counter: u32
-}
-
-impl MMU {
-    pub(super) fn new(cartridge: Cartridge, frame_buffer: FrameBuffer) -> Self {
-        Self {
-            cartridge,
-            ppu: PPU::new(frame_buffer),
-            wram: [0; WRAM_SIZE],
-            hram: [0; HRAM_SIZE],
-            joypad: Joypad::new(),
-            serial: Serial::new(),
-            timer: Timer::new(),
-            interrupt_enable: 0x00,
-            interrupt_flag: 0x00,
-            tick_counter: 0
-        }
-    }
-
-    pub(super) fn tick_count(&self) -> u32 {
-        self.tick_counter
-    }
-
-    pub(super) fn reset_tick_counter(&mut self) {
-        self.tick_counter = 0;
-    }
-
+impl <'a> Bus<'a> {
     pub(super) fn read_cycle(&mut self, address: u16) -> u8 {
         let byte = self.read(address);
         self.cycle(4);
@@ -119,7 +71,7 @@ impl MMU {
             REG_TMA => self.timer.modulo(),
             REG_TAC => self.timer.control(),
 
-            REG_IF => self.interrupt_flag | 0xE0,
+            REG_IF => self.interrupts.flags(),
 
             REG_LCDC => self.ppu.lcd_control(),
             REG_STAT => self.ppu.lcd_status(),
@@ -135,7 +87,7 @@ impl MMU {
             REG_WX => self.ppu.window_x(),
 
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize],
-            REG_IE => self.interrupt_enable,
+            REG_IE => self.interrupts.enabled(),
 
             _ => 0xFF
         }
@@ -163,7 +115,7 @@ impl MMU {
             REG_TMA => self.timer.set_modulo(value),
             REG_TAC => self.timer.set_control(value),
 
-            REG_IF => self.interrupt_flag = value,
+            REG_IF => self.interrupts.set_flags(value),
 
             REG_LCDC => self.ppu.set_lcd_control(value),
             REG_STAT => self.ppu.set_lcd_status(value),
@@ -178,18 +130,17 @@ impl MMU {
             REG_WX => self.ppu.set_window_x(value),
 
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize] = value,
-            REG_IE => self.interrupt_enable = value,
+            REG_IE => self.interrupts.set_enabled(value),
 
             _ => {}
         }
     }
 
     pub(super) fn cycle(&mut self, ticks: u32) {
-        self.tick_counter += ticks;
         self.timer.cycle(ticks);
 
         if self.timer.interrupt() {
-            self.interrupt_flag |= Interrupt::Timer as u8;
+            self.interrupts.set_flag(InterruptType::Timer);
             self.timer.set_interrupt(false);
         }
 
@@ -198,22 +149,8 @@ impl MMU {
         }
 
         if self.ppu.interrupt() {
-            self.interrupt_flag |= Interrupt::LCD as u8;
+            self.interrupts.set_flag(InterruptType::LCD);
             self.ppu.set_interrupt(false);
         }
-    }
-
-    pub(super) fn interrupt_enabled(&self) -> bool {
-        (self.interrupt_enable & 0x1F) & (self.interrupt_flag & 0x1F) > 0x00
-    }
-
-    pub(super) fn interrupt_flag(&self, interrupt: Interrupt) -> bool {
-        let interrupt = interrupt as u8;
-
-        (self.interrupt_enable & interrupt) & (self.interrupt_flag & interrupt) > 0x00
-    }
-
-    pub(super) fn unflag_interrupt(&mut self, interrupt: Interrupt) {
-        self.interrupt_flag &= !(interrupt as u8)
     }
 }

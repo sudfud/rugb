@@ -6,8 +6,9 @@ pub struct Timer {
     enabled: bool,
     step_count: u32,
     system_clock: u32,
-    pub timer_clock: u32,
-    interrupt: bool
+    timer_clock: u32,
+    interrupt: bool,
+    tick_count: u32
 }
 
 impl Timer {
@@ -19,9 +20,10 @@ impl Timer {
             control: 0x00,
             enabled: false,
             step_count: 1024,
-            system_clock: 0x00,
-            timer_clock: 0x00,
-            interrupt: false
+            system_clock: 0,
+            timer_clock: 0,
+            interrupt: false,
+            tick_count: 0
         }
     }
 
@@ -74,7 +76,16 @@ impl Timer {
         self.interrupt = value;
     }
 
+    pub(super) fn tick_count(&self) -> u32 {
+        self.tick_count
+    }
+
+    pub(super) fn reset_tick_count(&mut self) {
+        self.tick_count = 0;
+    }
+
     pub(super) fn cycle(&mut self, ticks: u32) {
+        self.tick_count += ticks;
         self.system_clock += ticks;
 
         while self.system_clock >= 256 {
