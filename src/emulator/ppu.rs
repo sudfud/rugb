@@ -35,7 +35,8 @@ pub(super) struct PPU {
     draw_time: u32,
     stat_interrupt_line: bool,
     interrupt: bool,
-    wy_latch: bool
+    wy_latch: bool,
+    lcd_state: LcdState
 }
 
 impl PPU {
@@ -52,7 +53,8 @@ impl PPU {
             draw_time: 0,
             stat_interrupt_line: false,
             interrupt: false,
-            wy_latch: false
+            wy_latch: false,
+            lcd_state: LcdState::Enabled
         }
     }
 
@@ -182,6 +184,32 @@ impl PPU {
     }
 
     pub(super) fn tick(&mut self) {
+        if self.lcd_state == LcdState::Enabled && !self.regs.lcd_control.lcd_enabled() {
+            self.lcd_state = LcdState::Disabled;
+            self.counter = 0;
+            self.regs.lcd_x = 0;
+            self.regs.lcd_y = 0;
+            self.wy_latch = false;
+            self.frame_buffer.as_mut_slice().fill(255);
+
+            self.bg_fetcher.reset();
+            self.bg_fetcher.window_line_counter = 0;
+            self.bg_fetcher.window_mode = false;
+            self.bg_fetcher.paused = false;
+
+            self.sprite_fetcher.counter = 0;
+            self.sprite_fetcher.current_sprite = None;
+            self.sprite_fetcher.prev_sprite = None;
+            self.sprite_fetcher.sprite_queue.clear();
+            self.sprite_fetcher.state = FetcherState::TileId;
+
+            return;
+        }
+
+        if self.lcd_state == LcdState::Disabled && self.regs.lcd_control.lcd_enabled() {
+            self.lcd_state = LcdState::Enabling;
+        }
+
         self.counter += 1;
 
         self.check_wy_latch();
@@ -218,6 +246,10 @@ impl PPU {
                 self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
                 if self.regs.lcd_y == 1 || self.regs.lcd_y >= SCANLINE_COUNT {
+                    if self.lcd_state == LcdState::Enabling {
+                        self.lcd_state = LcdState::Enabled;
+                    }
+
                     self.regs.lcd_y = 0;
                     self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
                     self.update_stat_interrupt();
@@ -328,14 +360,16 @@ impl PPU {
                                     WHITE
                                 };
 
-                                let row = self.regs.lcd_y as usize;
-                                let column = self.regs.lcd_x as usize;
-                                let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
+                                if self.lcd_state == LcdState::Enabled {
+                                    let row = self.regs.lcd_y as usize;
+                                    let column = self.regs.lcd_x as usize;
+                                    let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
 
-                                // Place each RGB channel into the frame buffer
-                                self.frame_buffer[pixel_address] = r;
-                                self.frame_buffer[pixel_address + 1] = g;
-                                self.frame_buffer[pixel_address + 2] = b;
+                                    // Place each RGB channel into the frame buffer
+                                    self.frame_buffer[pixel_address] = r;
+                                    self.frame_buffer[pixel_address + 1] = g;
+                                    self.frame_buffer[pixel_address + 2] = b;
+                                }
 
                                 self.regs.lcd_x += 1;
 
@@ -379,6 +413,14 @@ impl PPU {
             self.wy_latch = true;
         }
     }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LcdState {
+    Enabled,
+    Disabled,
+    Enabling
 }
 
 #[repr(u8)]
