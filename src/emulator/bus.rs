@@ -1,12 +1,13 @@
-use super::{Cartridge, HRAM, Interrupts, Joypad, PPU, Serial, Timer, WRAM};
+use super::{Emulator, Cartridge, DMA, HRAM, Interrupts, Joypad, OAM, PPU, Serial, Timer, VRAM, WRAM};
+use super::dma::DmaState;
 use super::interrupts::InterruptType;
 
-const ROM_START: u16 = 0x0000;
-const VRAM_START: u16 = 0x8000;
-const RAM_START: u16 = 0xA000;
-const WRAM_START: u16 = 0xC000;
-const ECHO_START: u16 = 0xE000;
-const OAM_START: u16 = 0xFE00;
+pub(super) const ROM_START: u16 = 0x0000;
+pub(super) const VRAM_START: u16 = 0x8000;
+pub(super) const RAM_START: u16 = 0xA000;
+pub(super) const WRAM_START: u16 = 0xC000;
+pub(super) const ECHO_START: u16 = 0xE000;
+pub(super) const OAM_START: u16 = 0xFE00;
 const UNUSED_START: u16 = 0xFEA0;
 const IO_START: u16 = 0xFF00;
 const HRAM_START: u16 = 0xFF80;
@@ -38,12 +39,15 @@ const REG_IE: u16 = 0xFFFF;
 
 pub(super) struct Bus<'a> {
     pub(super) cartridge: &'a mut Cartridge,
+    pub(super) dma: &'a mut DMA,
     pub(super) hram: &'a mut HRAM,
     pub(super) interrupts: &'a mut Interrupts,
     pub(super) joypad: &'a mut Joypad,
+    pub(super) oam: &'a mut OAM,
     pub(super) ppu: &'a mut PPU,
     pub(super) serial: &'a mut Serial,
     pub(super) timer: &'a mut Timer,
+    pub(super) vram: &'a mut VRAM,
     pub(super) wram: &'a mut WRAM
 }
 
@@ -55,13 +59,17 @@ impl <'a> Bus<'a> {
     }
 
     pub(super) fn read(&self, address: u16) -> u8 {
+        if let DmaState::Transferring(byte) = self.dma.state() && address < IO_START {
+            return byte;
+        }
+
         match address {
             ROM_START..VRAM_START => self.cartridge.read_rom(address),
-            VRAM_START..RAM_START => self.ppu.read_vram(address - VRAM_START),
+            VRAM_START..RAM_START => self.vram[(address - VRAM_START) as usize],
             RAM_START..WRAM_START => self.cartridge.read_ram(address - RAM_START),
             WRAM_START..ECHO_START => self.wram[(address - WRAM_START) as usize],
             ECHO_START..OAM_START => self.wram[(address - ECHO_START) as usize],
-            OAM_START..UNUSED_START => self.ppu.read_oam(address - OAM_START),
+            OAM_START..UNUSED_START => self.oam[(address - OAM_START) as usize],
 
             REG_SB => self.serial.data(),
             REG_SC => self.serial.control(),
@@ -99,13 +107,17 @@ impl <'a> Bus<'a> {
     }
 
     pub(super) fn write(&mut self, address: u16, value: u8) {
+        if let DmaState::Transferring(_) = self.dma.state() && address < IO_START {
+            return;
+        }
+
         match address {
             ROM_START..VRAM_START => self.cartridge.write_rom(address, value),
-            VRAM_START..RAM_START => self.ppu.write_vram(address - VRAM_START, value),
+            VRAM_START..RAM_START => self.vram[(address - VRAM_START) as usize] = value,
             RAM_START..WRAM_START => self.cartridge.write_ram(address - RAM_START, value),
             WRAM_START..ECHO_START => self.wram[(address - WRAM_START) as usize] = value,
             ECHO_START..OAM_START => self.wram[(address - ECHO_START) as usize] = value,
-            OAM_START..UNUSED_START => self.ppu.write_oam(address - OAM_START, value),
+            OAM_START..UNUSED_START => self.oam[(address - OAM_START) as usize] = value,
 
             REG_SB => self.serial.set_data(value),
             REG_SC => self.serial.set_control(value),
@@ -122,7 +134,10 @@ impl <'a> Bus<'a> {
             REG_SCY => self.ppu.set_viewport_y(value),
             REG_SCX => self.ppu.set_viewport_x(value),
             REG_LYC => self.ppu.set_ly_compare(value),
-            REG_DMA => self.ppu.set_dma_start(value),
+            REG_DMA => {
+                self.ppu.set_dma_start(value);
+                self.dma.start((value as u16) << 8);
+            },
             REG_BGP => self.ppu.set_bg_palette(value),
             REG_OBP0 => self.ppu.set_obj_palette_0(value),
             REG_OBP1 => self.ppu.set_obj_palette_1(value),
@@ -145,7 +160,8 @@ impl <'a> Bus<'a> {
         }
 
         for _ in 0..ticks {
-            self.ppu.tick();
+            self.ppu.tick(self.vram, self.oam);
+            self.dma.tick(self.cartridge, self.vram, self.wram, self.oam);
         }
 
         if self.ppu.interrupt() {

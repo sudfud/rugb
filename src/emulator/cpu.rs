@@ -25,7 +25,6 @@ impl std::fmt::Display for CPUError {
 
 pub(super) struct CPU {
     registers: Registers,
-    // mmu: MMU,
     interrupt_master_enable: bool,
     ei_timer: u8,
     di_timer: u8,

@@ -2,6 +2,8 @@ use std::collections::VecDeque;
 
 use crate::{SCREEN_WIDTH, SCREEN_HEIGHT};
 
+use super::{OAM, VRAM};
+
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0xA0;
 
@@ -24,8 +26,6 @@ const BLACK: (u8, u8, u8) = (0, 0, 0);
 pub(super) type FrameBuffer = [u8; SCREEN_WIDTH * SCREEN_HEIGHT * 3];
 
 pub(super) struct PPU {
-    vram: [u8; VRAM_SIZE],
-    oam: [u8; OAM_SIZE],
     frame_buffer: FrameBuffer,
     regs: Registers,
     bg_fetcher: BackgroundFetcher,
@@ -42,8 +42,6 @@ pub(super) struct PPU {
 impl PPU {
     pub(super) fn new() -> Self {
         Self {
-            vram: [0; VRAM_SIZE],
-            oam: [0; OAM_SIZE],
             frame_buffer: [0; SCREEN_WIDTH * SCREEN_HEIGHT * 3],
             regs: Registers::new(),
             bg_fetcher: BackgroundFetcher::new(),
@@ -60,22 +58,6 @@ impl PPU {
 
     pub(super) fn frame_buffer(&self) -> &FrameBuffer {
         &self.frame_buffer
-    }
-
-    pub(super) fn read_vram(&self, address: u16) -> u8 {
-        self.vram[address as usize]
-    }
-
-    pub(super) fn write_vram(&mut self, address: u16, value: u8) {
-        self.vram[address as usize] = value;
-    }
-
-    pub(super) fn read_oam(&self, address: u16) -> u8 {
-        self.oam[address as usize]
-    }
-
-    pub(super) fn write_oam(&mut self, address: u16, value: u8) {
-        self.oam[address as usize] = value;
     }
 
     pub(super) fn lcd_control(&self) -> u8 {
@@ -183,9 +165,11 @@ impl PPU {
         self.interrupt = value;
     }
 
-    pub(super) fn tick(&mut self) {
+    pub(super) fn tick(&mut self, vram: &VRAM, oam: &OAM) {
+        // LCD has been disabled, reset and pause the PPU
         if self.lcd_state == LcdState::Enabled && !self.regs.lcd_control.lcd_enabled() {
             self.lcd_state = LcdState::Disabled;
+            self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
             self.counter = 0;
             self.regs.lcd_x = 0;
             self.regs.lcd_y = 0;
@@ -206,8 +190,10 @@ impl PPU {
             return;
         }
 
+        // LCD has been enabled, first frame after enabling will be skipped
         if self.lcd_state == LcdState::Disabled && self.regs.lcd_control.lcd_enabled() {
             self.lcd_state = LcdState::Enabling;
+            self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
         }
 
         self.counter += 1;
@@ -246,6 +232,8 @@ impl PPU {
                 self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
                 if self.regs.lcd_y == 1 || self.regs.lcd_y >= SCANLINE_COUNT {
+
+                    // First frame after enabling has completed, resume drawing to the screen
                     if self.lcd_state == LcdState::Enabling {
                         self.lcd_state = LcdState::Enabled;
                     }
@@ -257,7 +245,7 @@ impl PPU {
             },
 
             RenderMode::ScanOAM => if self.counter >= OAM_TIME {
-                self.sprite_fetcher.fill_buffer(&self.oam, &self.regs);
+                self.sprite_fetcher.fill_buffer(oam, &self.regs);
 
                 self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
                 self.update_stat_interrupt();
@@ -268,7 +256,7 @@ impl PPU {
                 self.draw_time += 1;
 
                 if self.bg_fetcher.paused {
-                    self.sprite_fetcher.tick(&self.vram, &self.regs);
+                    self.sprite_fetcher.tick(vram, &self.regs);
 
                     // Sprite fetcher is still running
                     if self.sprite_fetcher.current_sprite.is_some() {
@@ -280,7 +268,7 @@ impl PPU {
                     return;
                 }
                 else {
-                    self.bg_fetcher.tick(&self.vram, &self.regs);
+                    self.bg_fetcher.tick(vram, &self.regs);
                 }
 
                 match self.draw_state {
@@ -312,13 +300,15 @@ impl PPU {
                     },
 
                     DrawState::ShiftPixels => {
-                        if self.regs.lcd_control.sprites_enabled() && self.sprite_fetcher.sprite_hit(self.regs.lcd_x) {
+                        // A sprite has been reached, pause background fetcher and start sprite fetcher
+                        if !self.bg_fetcher.paused && self.regs.lcd_control.sprites_enabled() && self.sprite_fetcher.sprite_hit(self.regs.lcd_x) {
                             self.bg_fetcher.paused = true;
                             self.bg_fetcher.counter = 0;
                             self.bg_fetcher.state = FetcherState::TileId;
                             return;
                         }
 
+                        // The window has been reached, switch background fetcher to window mode
                         if !self.bg_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
                             self.bg_fetcher.window_mode = true;
                             self.bg_fetcher.reset();
@@ -327,6 +317,7 @@ impl PPU {
 
                         match self.bg_fetcher.bg_queue.pop_front() {
                             Some(bg_pixel) => {
+                                // Mix background and sprite pixels
                                 let (pixel, palette, is_sprite) = match self.sprite_fetcher.sprite_queue.pop_front() {
                                     Some(sprite_pixel) => {
                                         let sprite_palette = match sprite_pixel.palette {
@@ -352,20 +343,19 @@ impl PPU {
                                 };
 
                                 // Convert pixel color to RGB
-                                let (r, g, b) = if is_sprite {
-                                    pixel.into_color(palette)
-                                } else if self.regs.lcd_control.bg_window_enabled() {
+                                let (r, g, b) = if is_sprite || self.regs.lcd_control.bg_window_enabled() {
                                     pixel.into_color(palette)
                                 } else {
                                     WHITE
                                 };
 
+                                
+                                // Place each RGB channel into the frame buffer, skip if we're on the first frame after enabling
                                 if self.lcd_state == LcdState::Enabled {
                                     let row = self.regs.lcd_y as usize;
                                     let column = self.regs.lcd_x as usize;
                                     let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
 
-                                    // Place each RGB channel into the frame buffer
                                     self.frame_buffer[pixel_address] = r;
                                     self.frame_buffer[pixel_address + 1] = g;
                                     self.frame_buffer[pixel_address + 2] = b;
@@ -932,6 +922,8 @@ impl SpriteFetcher {
                     let start_index = if sprite.x < TILE_SIZE_PIXELS {
                         TILE_SIZE_PIXELS - sprite.x
                     } else if let Some(prev_sprite) = self.prev_sprite {
+
+                        // Remove transparent pixels from previous sprite that overlap with current sprite
                         if sprite.x - prev_sprite.x < TILE_SIZE_PIXELS {
                             while let Some(pixel) = self.sprite_queue.back().copied() {
                                 if pixel.color == ColorIndex::Zero {
@@ -949,6 +941,7 @@ impl SpriteFetcher {
                         0
                     };
 
+                    // Convert tile data to pixels and add them to the sprite queue
                     let range: Box<dyn Iterator<Item = u8>> = if sprite.flip_x() {
                         Box::new(start_index..TILE_SIZE_PIXELS)
                     } else {
