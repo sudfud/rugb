@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{SCREEN_WIDTH, SCREEN_HEIGHT};
+use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
 use super::{OAM, VRAM};
 
@@ -37,7 +37,7 @@ pub(super) struct PPU {
     lcd_interrupt: bool,
     vblank_interrupt: bool,
     wy_latch: bool,
-    lcd_state: LcdState
+    lcd_state: LcdState,
 }
 
 impl PPU {
@@ -54,7 +54,7 @@ impl PPU {
             lcd_interrupt: false,
             vblank_interrupt: false,
             wy_latch: false,
-            lcd_state: LcdState::Enabled
+            lcd_state: LcdState::Enabled,
         }
     }
 
@@ -106,7 +106,9 @@ impl PPU {
 
     pub(super) fn set_ly_compare(&mut self, value: u8) {
         self.regs.ly_compare = value;
-        self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
+        self.regs
+            .lcd_status
+            .set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
         self.update_stat_interrupt();
     }
 
@@ -213,59 +215,68 @@ impl PPU {
         self.counter += 1;
 
         self.check_wy_latch();
-        
+
         match self.regs.lcd_status.ppu_mode() {
-            RenderMode::HBlank => if self.counter >= SCANLINE_TIME {
-                self.counter -= SCANLINE_TIME;
+            RenderMode::HBlank => {
+                if self.counter >= SCANLINE_TIME {
+                    self.counter -= SCANLINE_TIME;
 
-                self.regs.lcd_y += 1;
-                self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
+                    self.regs.lcd_y += 1;
+                    self.regs
+                        .lcd_status
+                        .set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
-                if self.bg_fetcher.window_mode {
-                    self.bg_fetcher.window_line_counter += 1;
-                }
-
-                self.bg_fetcher.window_mode = false;
-                
-                self.regs.lcd_status.set_ppu_mode(
-                    if self.regs.lcd_y as usize >= SCREEN_HEIGHT {
-                        self.wy_latch = false;
-                        self.bg_fetcher.window_line_counter = 0;
-                        self.vblank_interrupt = true;
-                        RenderMode::VBlank
-                    } else {
-                        RenderMode::ScanOAM
-                    }
-                );
-
-                self.update_stat_interrupt();
-            },
-
-            RenderMode::VBlank => if self.counter >= SCANLINE_TIME {
-                self.counter -= SCANLINE_TIME;
-                self.regs.lcd_y += 1;
-                self.regs.lcd_status.set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
-
-                if self.regs.lcd_y == 1 || self.regs.lcd_y >= SCANLINE_COUNT {
-
-                    // First frame after enabling has completed, resume drawing to the screen
-                    if self.lcd_state == LcdState::Enabling {
-                        self.lcd_state = LcdState::Enabled;
+                    if self.bg_fetcher.window_mode {
+                        self.bg_fetcher.window_line_counter += 1;
                     }
 
-                    self.regs.lcd_y = 0;
-                    self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
+                    self.bg_fetcher.window_mode = false;
+
+                    self.regs.lcd_status.set_ppu_mode(
+                        if self.regs.lcd_y as usize >= SCREEN_HEIGHT {
+                            self.wy_latch = false;
+                            self.bg_fetcher.window_line_counter = 0;
+                            self.vblank_interrupt = true;
+                            RenderMode::VBlank
+                        } else {
+                            RenderMode::ScanOAM
+                        },
+                    );
+
                     self.update_stat_interrupt();
                 }
-            },
+            }
 
-            RenderMode::ScanOAM => if self.counter >= OAM_TIME {
-                self.sprite_fetcher.fill_buffer(oam, &self.regs);
+            RenderMode::VBlank => {
+                if self.counter >= SCANLINE_TIME {
+                    self.counter -= SCANLINE_TIME;
+                    self.regs.lcd_y += 1;
+                    self.regs
+                        .lcd_status
+                        .set_lyc_ly_equal(self.regs.lcd_y == self.regs.ly_compare);
 
-                self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
-                self.update_stat_interrupt();
-                self.draw_state = DrawState::InitialLoad(0);
-            },
+                    if self.regs.lcd_y == 1 || self.regs.lcd_y >= SCANLINE_COUNT {
+                        // First frame after enabling has completed, resume drawing to the screen
+                        if self.lcd_state == LcdState::Enabling {
+                            self.lcd_state = LcdState::Enabled;
+                        }
+
+                        self.regs.lcd_y = 0;
+                        self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
+                        self.update_stat_interrupt();
+                    }
+                }
+            }
+
+            RenderMode::ScanOAM => {
+                if self.counter >= OAM_TIME {
+                    self.sprite_fetcher.fill_buffer(oam, &self.regs);
+
+                    self.regs.lcd_status.set_ppu_mode(RenderMode::Draw);
+                    self.update_stat_interrupt();
+                    self.draw_state = DrawState::InitialLoad(0);
+                }
+            }
 
             RenderMode::Draw => {
                 self.draw_time += 1;
@@ -281,8 +292,7 @@ impl PPU {
                     // Sprite fetcher is done, resume background fetcher
                     self.bg_fetcher.paused = false;
                     return;
-                }
-                else {
+                } else {
                     self.bg_fetcher.tick(vram, &self.regs);
                 }
 
@@ -298,25 +308,29 @@ impl PPU {
                             }
 
                             self.draw_state = DrawState::InitialLoad(time);
-                        }
-                        else if self.regs.scroll_x % TILE_SIZE_PIXELS != 0 {
-                            self.draw_state = DrawState::DiscardPixels(self.regs.scroll_x % TILE_SIZE_PIXELS);
-                        }
-                        else {
+                        } else if self.regs.scroll_x % TILE_SIZE_PIXELS != 0 {
+                            self.draw_state =
+                                DrawState::DiscardPixels(self.regs.scroll_x % TILE_SIZE_PIXELS);
+                        } else {
                             self.draw_state = DrawState::ShiftPixels;
                         }
-                    },
+                    }
 
-                    DrawState::DiscardPixels(time_left) => if time_left > 0 {
-                        self.bg_fetcher.bg_queue.pop_front();
-                        self.draw_state = DrawState::DiscardPixels(time_left - 1);
-                    } else {
-                        self.draw_state = DrawState::ShiftPixels;
-                    },
+                    DrawState::DiscardPixels(time_left) => {
+                        if time_left > 0 {
+                            self.bg_fetcher.bg_queue.pop_front();
+                            self.draw_state = DrawState::DiscardPixels(time_left - 1);
+                        } else {
+                            self.draw_state = DrawState::ShiftPixels;
+                        }
+                    }
 
                     DrawState::ShiftPixels => {
                         // A sprite has been reached, pause background fetcher and start sprite fetcher
-                        if !self.bg_fetcher.paused && self.regs.lcd_control.sprites_enabled() && self.sprite_fetcher.sprite_hit(self.regs.lcd_x) {
+                        if !self.bg_fetcher.paused
+                            && self.regs.lcd_control.sprites_enabled()
+                            && self.sprite_fetcher.sprite_hit(self.regs.lcd_x)
+                        {
                             self.bg_fetcher.paused = true;
                             self.bg_fetcher.counter = 0;
                             self.bg_fetcher.state = FetcherState::TileId;
@@ -324,7 +338,11 @@ impl PPU {
                         }
 
                         // The window has been reached, switch background fetcher to window mode
-                        if !self.bg_fetcher.window_mode && self.regs.lcd_control.window_enabled() && self.wy_latch && self.regs.lcd_x + 7 >= self.regs.window_x {
+                        if !self.bg_fetcher.window_mode
+                            && self.regs.lcd_control.window_enabled()
+                            && self.wy_latch
+                            && self.regs.lcd_x + 7 >= self.regs.window_x
+                        {
                             self.bg_fetcher.window_mode = true;
                             self.bg_fetcher.reset();
                             return;
@@ -333,38 +351,46 @@ impl PPU {
                         match self.bg_fetcher.bg_queue.pop_front() {
                             Some(bg_pixel) => {
                                 // Mix background and sprite pixels
-                                let (pixel, palette, is_sprite) = match self.sprite_fetcher.sprite_queue.pop_front() {
+                                let (pixel, palette, is_sprite) = match self
+                                    .sprite_fetcher
+                                    .sprite_queue
+                                    .pop_front()
+                                {
                                     Some(sprite_pixel) => {
                                         let sprite_palette = match sprite_pixel.palette {
                                             Palette::OBP0 => self.regs.obj_palette_0,
-                                            Palette::OBP1 => self.regs.obj_palette_1
+                                            Palette::OBP1 => self.regs.obj_palette_1,
                                         };
 
                                         if let ColorIndex::Zero = sprite_pixel.color {
                                             (bg_pixel, self.regs.bg_palette, false)
                                         } else {
                                             match sprite_pixel.priority {
-                                                SpritePriority::Front => (sprite_pixel.color, sprite_palette, true),
-                                                SpritePriority::Back => if bg_pixel != ColorIndex::Zero {
-                                                    (bg_pixel, self.regs.bg_palette, false)
-                                                } else {
+                                                SpritePriority::Front => {
                                                     (sprite_pixel.color, sprite_palette, true)
+                                                }
+                                                SpritePriority::Back => {
+                                                    if bg_pixel != ColorIndex::Zero {
+                                                        (bg_pixel, self.regs.bg_palette, false)
+                                                    } else {
+                                                        (sprite_pixel.color, sprite_palette, true)
+                                                    }
                                                 }
                                             }
                                         }
-                                    },
+                                    }
 
-                                    None => (bg_pixel, self.regs.bg_palette, false)
+                                    None => (bg_pixel, self.regs.bg_palette, false),
                                 };
 
                                 // Convert pixel color to RGB
-                                let (r, g, b) = if is_sprite || self.regs.lcd_control.bg_window_enabled() {
-                                    pixel.into_color(palette)
-                                } else {
-                                    WHITE
-                                };
+                                let (r, g, b) =
+                                    if is_sprite || self.regs.lcd_control.bg_window_enabled() {
+                                        pixel.into_color(palette)
+                                    } else {
+                                        WHITE
+                                    };
 
-                                
                                 // Place each RGB channel into the frame buffer, skip if we're on the first frame after enabling
                                 if self.lcd_state == LcdState::Enabled {
                                     let row = self.regs.lcd_y as usize;
@@ -390,8 +416,8 @@ impl PPU {
 
                                     self.update_stat_interrupt();
                                 }
-                            },
-                            None => return
+                            }
+                            None => return,
                         }
                     }
                 }
@@ -414,7 +440,10 @@ impl PPU {
     }
 
     fn check_wy_latch(&mut self) {
-        if !self.wy_latch && self.regs.lcd_control.window_enabled() && self.regs.lcd_y == self.regs.window_y {
+        if !self.wy_latch
+            && self.regs.lcd_control.window_enabled()
+            && self.regs.lcd_y == self.regs.window_y
+        {
             self.wy_latch = true;
         }
     }
@@ -425,7 +454,7 @@ impl PPU {
 enum LcdState {
     Enabled,
     Disabled,
-    Enabling
+    Enabling,
 }
 
 #[repr(u8)]
@@ -433,14 +462,14 @@ enum LcdState {
 enum DrawState {
     InitialLoad(u8),
     DiscardPixels(u8),
-    ShiftPixels
+    ShiftPixels,
 }
 
 #[repr(u8)]
 #[derive(Clone, Copy)]
 enum AddressMode {
     Signed,
-    Unsigned
+    Unsigned,
 }
 
 struct LcdControl(u8);
@@ -453,8 +482,7 @@ impl LcdControl {
     fn window_tile_map(&self) -> usize {
         if self.0 & 0x40 == 0x00 {
             MAP0_START
-        }
-        else {
+        } else {
             MAP1_START
         }
     }
@@ -466,8 +494,7 @@ impl LcdControl {
     fn address_mode(&self) -> AddressMode {
         if self.0 & 0x10 > 0 {
             AddressMode::Unsigned
-        }
-        else {
+        } else {
             AddressMode::Signed
         }
     }
@@ -475,8 +502,7 @@ impl LcdControl {
     fn bg_tile_map(&self) -> usize {
         if self.0 & 0x08 == 0x00 {
             MAP0_START
-        }
-        else {
+        } else {
             MAP1_START
         }
     }
@@ -484,8 +510,7 @@ impl LcdControl {
     fn sprite_size(&self) -> u8 {
         if self.0 & 0x04 == 0x00 {
             TILE_SIZE_PIXELS
-        }
-        else {
+        } else {
             TILE_SIZE_PIXELS * 2
         }
     }
@@ -505,7 +530,7 @@ enum RenderMode {
     HBlank = 0,
     VBlank = 1,
     ScanOAM = 2,
-    Draw = 3
+    Draw = 3,
 }
 
 struct LcdStatus(u8);
@@ -544,7 +569,7 @@ impl LcdStatus {
             0 => RenderMode::HBlank,
             1 => RenderMode::VBlank,
             2 => RenderMode::ScanOAM,
-            _ => RenderMode::Draw
+            _ => RenderMode::Draw,
         }
     }
 
@@ -585,7 +610,7 @@ impl Registers {
             window_y: 0,
             lcd_y: 0,
             lcd_x: 0,
-            ly_compare: 0
+            ly_compare: 0,
         }
     }
 }
@@ -596,7 +621,7 @@ enum ColorIndex {
     Zero = 0,
     One = 1,
     Two = 2,
-    Three = 3
+    Three = 3,
 }
 
 impl ColorIndex {
@@ -609,7 +634,7 @@ impl ColorIndex {
             0 => WHITE,
             1 => LIGHT_GRAY,
             2 => DARK_GRAY,
-            _ => BLACK
+            _ => BLACK,
         }
     }
 }
@@ -620,7 +645,7 @@ enum FetcherState {
     TileId,
     TileDataLow,
     TileDataHigh,
-    Push
+    Push,
 }
 
 struct BackgroundFetcher {
@@ -633,7 +658,7 @@ struct BackgroundFetcher {
     tile_data_high: u8,
     state: FetcherState,
     x_position: u8,
-    bg_queue: VecDeque<ColorIndex>
+    bg_queue: VecDeque<ColorIndex>,
 }
 
 impl BackgroundFetcher {
@@ -648,7 +673,7 @@ impl BackgroundFetcher {
             tile_data_high: 0,
             state: FetcherState::TileId,
             x_position: 0,
-            bg_queue: VecDeque::new()
+            bg_queue: VecDeque::new(),
         }
     }
 
@@ -680,9 +705,9 @@ impl BackgroundFetcher {
 
                     vram[bg_address + ((x + y) & 0x03FF)]
                 };
-                
+
                 self.state = FetcherState::TileDataLow;
-            },
+            }
 
             FetcherState::TileDataLow => {
                 self.counter += 1;
@@ -695,7 +720,7 @@ impl BackgroundFetcher {
 
                 self.tile_data_low = vram[self.tile_address(regs)];
                 self.state = FetcherState::TileDataHigh;
-            },
+            }
 
             FetcherState::TileDataHigh => {
                 self.counter += 1;
@@ -712,11 +737,10 @@ impl BackgroundFetcher {
                     self.fill_bg_queue();
                     self.x_position += 1;
                     self.state = FetcherState::TileId;
-                }
-                else {
+                } else {
                     self.state = FetcherState::Push;
                 }
-            },
+            }
 
             FetcherState::Push => {
                 if self.bg_queue.is_empty() {
@@ -730,8 +754,7 @@ impl BackgroundFetcher {
 
     fn tile_address(&self, regs: &Registers) -> usize {
         let address = match regs.lcd_control.address_mode() {
-            AddressMode::Unsigned
-                => TILE_SIZE_BYTES * self.tile_index as usize,
+            AddressMode::Unsigned => TILE_SIZE_BYTES * self.tile_index as usize,
             AddressMode::Signed => {
                 let signed_index = self.tile_index as i8 as isize;
                 0x1000_usize.wrapping_add_signed(TILE_SIZE_BYTES as isize * signed_index)
@@ -754,7 +777,7 @@ impl BackgroundFetcher {
                 0 => ColorIndex::Zero,
                 1 => ColorIndex::One,
                 2 => ColorIndex::Two,
-                _ => ColorIndex::Three
+                _ => ColorIndex::Three,
             };
 
             self.bg_queue.push_back(color);
@@ -773,14 +796,14 @@ impl BackgroundFetcher {
 #[derive(Clone, Copy)]
 enum SpritePriority {
     Front = 0,
-    Back = 0b1000_0000
+    Back = 0b1000_0000,
 }
 
 #[repr(u8)]
 #[derive(Clone, Copy)]
 enum Palette {
     OBP0 = 0,
-    OBP1 = 0b0001_0000
+    OBP1 = 0b0001_0000,
 }
 
 #[derive(Clone, Copy)]
@@ -789,7 +812,7 @@ struct Sprite {
     x: u8,
     y: u8,
     tile_number: u8,
-    flags: u8
+    flags: u8,
 }
 
 impl Sprite {
@@ -799,14 +822,14 @@ impl Sprite {
             x,
             y,
             tile_number,
-            flags
+            flags,
         }
     }
 
     fn palette(&self) -> Palette {
         match self.flags & 0x10 {
             0 => Palette::OBP0,
-            _ => Palette::OBP1
+            _ => Palette::OBP1,
         }
     }
 
@@ -821,7 +844,7 @@ impl Sprite {
     fn priority(&self) -> SpritePriority {
         match self.flags & 0x80 {
             0 => SpritePriority::Front,
-            _ => SpritePriority::Back
+            _ => SpritePriority::Back,
         }
     }
 }
@@ -830,7 +853,7 @@ impl Sprite {
 struct SpritePixel {
     color: ColorIndex,
     palette: Palette,
-    priority: SpritePriority
+    priority: SpritePriority,
 }
 
 struct SpriteFetcher {
@@ -842,7 +865,7 @@ struct SpriteFetcher {
     sprite_buffer: Vec<Sprite>,
     current_sprite: Option<Sprite>,
     prev_sprite: Option<Sprite>,
-    sprite_queue: VecDeque<SpritePixel>
+    sprite_queue: VecDeque<SpritePixel>,
 }
 
 impl SpriteFetcher {
@@ -856,7 +879,7 @@ impl SpriteFetcher {
             sprite_buffer: Vec::with_capacity(10),
             current_sprite: None,
             prev_sprite: None,
-            sprite_queue: VecDeque::new()
+            sprite_queue: VecDeque::new(),
         }
     }
 
@@ -880,13 +903,12 @@ impl SpriteFetcher {
 
                         if y < TILE_SIZE_PIXELS {
                             self.tile_index &= 0xFE;
-                        }
-                        else {
+                        } else {
                             self.tile_index = (self.tile_index & 0xFE) + 1;
                         }
                     }
                     self.state = FetcherState::TileDataLow;
-                },
+                }
 
                 FetcherState::TileDataLow => {
                     self.counter += 1;
@@ -910,7 +932,7 @@ impl SpriteFetcher {
 
                     self.tile_data_low = vram[address + 2 * y];
                     self.state = FetcherState::TileDataHigh;
-                },
+                }
 
                 FetcherState::TileDataHigh => {
                     self.counter += 1;
@@ -937,7 +959,6 @@ impl SpriteFetcher {
                     let start_index = if sprite.x < TILE_SIZE_PIXELS {
                         TILE_SIZE_PIXELS - sprite.x
                     } else if let Some(prev_sprite) = self.prev_sprite {
-
                         // Remove transparent pixels from previous sprite that overlap with current sprite
                         if sprite.x - prev_sprite.x < TILE_SIZE_PIXELS {
                             while let Some(pixel) = self.sprite_queue.back().copied() {
@@ -948,8 +969,7 @@ impl SpriteFetcher {
                                 }
                             }
                             self.sprite_queue.len() as u8
-                        }
-                        else {
+                        } else {
                             0
                         }
                     } else {
@@ -971,13 +991,13 @@ impl SpriteFetcher {
                             0 => ColorIndex::Zero,
                             1 => ColorIndex::One,
                             2 => ColorIndex::Two,
-                            _ => ColorIndex::Three
+                            _ => ColorIndex::Three,
                         };
 
                         let sprite_pixel = SpritePixel {
                             color,
                             palette: sprite.palette(),
-                            priority: sprite.priority()
+                            priority: sprite.priority(),
                         };
 
                         self.sprite_queue.push_back(sprite_pixel);
@@ -986,7 +1006,7 @@ impl SpriteFetcher {
                     self.prev_sprite = self.current_sprite;
                     self.current_sprite = None;
                     self.state = FetcherState::TileId;
-                },
+                }
 
                 FetcherState::Push => {}
             }
@@ -1031,8 +1051,7 @@ impl SpriteFetcher {
         self.sprite_buffer.sort_by(|a, b| {
             if a.x != b.x {
                 b.x.cmp(&a.x)
-            }
-            else {
+            } else {
                 b.oam_index.cmp(&a.oam_index)
             }
         });

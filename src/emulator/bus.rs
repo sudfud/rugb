@@ -1,6 +1,8 @@
-use super::{Emulator, Cartridge, DMA, HRAM, Interrupts, Joypad, OAM, PPU, Serial, Timer, VRAM, WRAM};
 use super::dma::DmaState;
 use super::interrupts::InterruptType;
+use super::{
+    Cartridge, DMA, Emulator, HRAM, Interrupts, Joypad, OAM, PPU, Serial, Timer, VRAM, WRAM,
+};
 
 pub(super) const ROM_START: u16 = 0x0000;
 pub(super) const VRAM_START: u16 = 0x8000;
@@ -49,10 +51,10 @@ pub(super) struct Bus<'a> {
     pub(super) serial: &'a mut Serial,
     pub(super) timer: &'a mut Timer,
     pub(super) vram: &'a mut VRAM,
-    pub(super) wram: &'a mut WRAM
+    pub(super) wram: &'a mut WRAM,
 }
 
-impl <'a> Bus<'a> {
+impl<'a> Bus<'a> {
     pub(super) fn read_cycle(&mut self, address: u16) -> u8 {
         let byte = self.read(address);
         self.cycle(4);
@@ -60,7 +62,9 @@ impl <'a> Bus<'a> {
     }
 
     pub(super) fn read(&self, address: u16) -> u8 {
-        if let DmaState::Transferring(byte) = self.dma.state() && address < IO_START {
+        if let DmaState::Transferring(byte) = self.dma.state()
+            && address < IO_START
+        {
             return byte;
         }
 
@@ -99,7 +103,7 @@ impl <'a> Bus<'a> {
             HRAM_START..REG_IE => self.hram[(address - HRAM_START) as usize],
             REG_IE => self.interrupts.enabled(),
 
-            _ => 0xFF
+            _ => 0xFF,
         }
     }
 
@@ -109,7 +113,9 @@ impl <'a> Bus<'a> {
     }
 
     pub(super) fn write(&mut self, address: u16, value: u8) {
-        if let DmaState::Transferring(_) = self.dma.state() && address < IO_START {
+        if let DmaState::Transferring(_) = self.dma.state()
+            && address < IO_START
+        {
             return;
         }
 
@@ -140,7 +146,7 @@ impl <'a> Bus<'a> {
             REG_DMA => {
                 self.ppu.set_dma_start(value);
                 self.dma.start((value as u16) << 8);
-            },
+            }
             REG_BGP => self.ppu.set_bg_palette(value),
             REG_OBP0 => self.ppu.set_obj_palette_0(value),
             REG_OBP1 => self.ppu.set_obj_palette_1(value),
@@ -164,7 +170,8 @@ impl <'a> Bus<'a> {
 
         for _ in 0..ticks {
             self.ppu.tick(self.vram, self.oam);
-            self.dma.tick(self.cartridge, self.vram, self.wram, self.oam);
+            self.dma
+                .tick(self.cartridge, self.vram, self.wram, self.oam);
         }
 
         if self.ppu.lcd_interrupt() {

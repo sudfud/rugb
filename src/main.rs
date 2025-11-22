@@ -6,12 +6,12 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use sdl2::event::Event;
-use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::keyboard::Keycode;
+use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::render::TextureAccess;
 
-use emulator::{Emulator, EmulatorError};
 use emulator::{ActionButton, DirectionButton};
+use emulator::{Emulator, EmulatorError};
 
 const FRAME_TICKS: u32 = 70224;
 const FRAME_TIME: Duration = Duration::from_micros(16750);
@@ -58,7 +58,9 @@ fn main() -> Result<(), RugbError> {
             .build()
             .map_err(|e| RugbError::SDL(e.to_string()))?;
 
-        window.set_minimum_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32).map_err(|e| RugbError::SDL(e.to_string()))?;
+        window
+            .set_minimum_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+            .map_err(|e| RugbError::SDL(e.to_string()))?;
 
         let mut canvas = window
             .into_canvas()
@@ -66,7 +68,9 @@ fn main() -> Result<(), RugbError> {
             .map_err(|e| RugbError::SDL(e.to_string()))?;
 
         canvas.set_draw_color(Color::BLACK);
-        canvas.set_logical_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32).map_err(|e| RugbError::SDL(e.to_string()))?;
+        canvas
+            .set_logical_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+            .map_err(|e| RugbError::SDL(e.to_string()))?;
 
         let texture_creator = canvas.texture_creator();
         let mut texture = texture_creator
@@ -74,7 +78,7 @@ fn main() -> Result<(), RugbError> {
                 Some(PixelFormatEnum::RGB24),
                 TextureAccess::Streaming,
                 SCREEN_WIDTH as u32,
-                SCREEN_HEIGHT as u32
+                SCREEN_HEIGHT as u32,
             )
             .map_err(|e| RugbError::SDL(e.to_string()))?;
 
@@ -90,9 +94,11 @@ fn main() -> Result<(), RugbError> {
 
                 canvas.clear();
 
-                texture.with_lock(None, |pixels, _pitch| {
-                    pixels.copy_from_slice(emulator.frame_buffer().as_slice());
-                }).map_err(RugbError::SDL)?;
+                texture
+                    .with_lock(None, |pixels, _pitch| {
+                        pixels.copy_from_slice(emulator.frame_buffer().as_slice());
+                    })
+                    .map_err(RugbError::SDL)?;
 
                 canvas.copy(&texture, None, None).map_err(RugbError::SDL)?;
 
@@ -107,8 +113,12 @@ fn main() -> Result<(), RugbError> {
 
                 for event in event_pump.poll_iter() {
                     match event {
-                        Event::KeyDown { keycode, .. } => update_key_press(&mut emulator, keycode, true),
-                        Event::KeyUp { keycode, .. } => update_key_press(&mut emulator, keycode, false),
+                        Event::KeyDown { keycode, .. } => {
+                            update_key_press(&mut emulator, keycode, true)
+                        }
+                        Event::KeyUp { keycode, .. } => {
+                            update_key_press(&mut emulator, keycode, false)
+                        }
                         Event::Quit { .. } => break 'running,
                         _ => {}
                     }

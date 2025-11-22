@@ -1,13 +1,13 @@
 pub(super) struct Serial {
     data: u8,
-    control: u8
+    control: u8,
 }
 
 impl Serial {
     pub(super) fn new() -> Self {
         Self {
             data: 0x00,
-            control: 0x00
+            control: 0x00,
         }
     }
 

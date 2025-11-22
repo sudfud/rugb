@@ -8,7 +8,7 @@ pub struct Timer {
     system_clock: u32,
     timer_clock: u32,
     interrupt: bool,
-    tick_count: u32
+    tick_count: u32,
 }
 
 impl Timer {
@@ -23,7 +23,7 @@ impl Timer {
             system_clock: 0,
             timer_clock: 0,
             interrupt: false,
-            tick_count: 0
+            tick_count: 0,
         }
     }
 
@@ -64,7 +64,7 @@ impl Timer {
             0 => 1024,
             1 => 16,
             2 => 64,
-            _ => 256
+            _ => 256,
         };
     }
 

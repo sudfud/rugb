@@ -18,7 +18,7 @@ use cpu::{CPU, CPUError};
 use dma::DMA;
 use interrupts::Interrupts;
 use joypad::Joypad;
-use ppu::{PPU, FrameBuffer};
+use ppu::{FrameBuffer, PPU};
 use serial::Serial;
 use timer::Timer;
 
@@ -35,7 +35,7 @@ type WRAM = [u8; WRAM_SIZE];
 #[derive(Debug)]
 pub(super) enum EmulatorError {
     Cartridge(CartridgeError),
-    CPU(CPUError)
+    CPU(CPUError),
 }
 
 impl std::fmt::Display for EmulatorError {
@@ -63,7 +63,7 @@ pub(super) struct Emulator {
     serial: Serial,
     timer: Timer,
     vram: VRAM,
-    wram: WRAM
+    wram: WRAM,
 }
 
 impl Emulator {
@@ -82,7 +82,7 @@ impl Emulator {
             serial: Serial::new(),
             timer: Timer::new(),
             vram: [0; VRAM_SIZE],
-            wram: [0; WRAM_SIZE]
+            wram: [0; WRAM_SIZE],
         })
     }
 
@@ -102,7 +102,7 @@ impl Emulator {
             serial: &mut self.serial,
             timer: &mut self.timer,
             vram: &mut self.vram,
-            wram: &mut self.wram
+            wram: &mut self.wram,
         };
 
         let ticks = self.cpu.execute(bus).map_err(EmulatorError::CPU)?;

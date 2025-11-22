@@ -5,7 +5,7 @@ pub(super) enum InterruptType {
     LCD = 0b0000_0010,
     Timer = 0b0000_0100,
     Serial = 0b0000_1000,
-    Joypad = 0b0001_0000
+    Joypad = 0b0001_0000,
 }
 
 pub(super) struct Interrupts {
@@ -17,7 +17,7 @@ impl Interrupts {
     pub(super) fn new() -> Self {
         Self {
             interrupt_enable: 0x00,
-            interrupt_flag: 0x00
+            interrupt_flag: 0x00,
         }
     }
 

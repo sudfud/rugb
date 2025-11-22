@@ -27,7 +27,7 @@ impl std::fmt::Display for CartridgeError {
 impl std::error::Error for CartridgeError {}
 
 pub(super) struct Cartridge {
-    mbc: Box<dyn MBC>
+    mbc: Box<dyn MBC>,
 }
 
 impl Cartridge {
@@ -58,7 +58,7 @@ impl TryFrom<&Path> for Cartridge {
         file.read(&mut memory).map_err(CartridgeError::IO)?;
 
         Ok(Self {
-            mbc: Box::new(MBC0::new(memory))
+            mbc: Box::new(MBC0::new(memory)),
         })
     }
 }

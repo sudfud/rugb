@@ -3,7 +3,7 @@ pub(crate) enum ActionButton {
     A = 0,
     B = 1,
     Select = 2,
-    Start = 3
+    Start = 3,
 }
 
 #[repr(u8)]
@@ -11,14 +11,14 @@ pub(crate) enum DirectionButton {
     Right = 0,
     Left = 1,
     Up = 2,
-    Down = 3
+    Down = 3,
 }
 
 pub(super) struct Joypad {
     data: u8,
     action: u8,
     direction: u8,
-    interrupt: bool
+    interrupt: bool,
 }
 
 impl Joypad {
@@ -27,7 +27,7 @@ impl Joypad {
             data: 0xFF,
             action: 0x0F,
             direction: 0x0F,
-            interrupt: false
+            interrupt: false,
         }
     }
 
