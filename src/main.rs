@@ -7,9 +7,11 @@ use std::time::{Duration, Instant};
 
 use sdl2::event::Event;
 use sdl2::pixels::{Color, PixelFormatEnum};
+use sdl2::keyboard::Keycode;
 use sdl2::render::TextureAccess;
 
 use emulator::{Emulator, EmulatorError};
+use emulator::{ActionButton, DirectionButton};
 
 const FRAME_TICKS: u32 = 70224;
 const FRAME_TIME: Duration = Duration::from_micros(16750);
@@ -102,12 +104,14 @@ fn main() -> Result<(), RugbError> {
                 }
 
                 current_time = Instant::now();
-            }
 
-            for event in event_pump.poll_iter() {
-                match event {
-                    Event::Quit { .. } => break 'running,
-                    _ => {}
+                for event in event_pump.poll_iter() {
+                    match event {
+                        Event::KeyDown { keycode, .. } => update_key_press(&mut emulator, keycode, true),
+                        Event::KeyUp { keycode, .. } => update_key_press(&mut emulator, keycode, false),
+                        Event::Quit { .. } => break 'running,
+                        _ => {}
+                    }
                 }
             }
         }
@@ -116,4 +120,19 @@ fn main() -> Result<(), RugbError> {
     }
 
     Ok(())
+}
+
+fn update_key_press(emulator: &mut Emulator, keycode: Option<Keycode>, pressed: bool) {
+    match keycode {
+        Some(Keycode::W) => emulator.set_direction_button(DirectionButton::Up, pressed),
+        Some(Keycode::A) => emulator.set_direction_button(DirectionButton::Left, pressed),
+        Some(Keycode::S) => emulator.set_direction_button(DirectionButton::Down, pressed),
+        Some(Keycode::D) => emulator.set_direction_button(DirectionButton::Right, pressed),
+
+        Some(Keycode::Z) => emulator.set_action_button(ActionButton::A, pressed),
+        Some(Keycode::X) => emulator.set_action_button(ActionButton::B, pressed),
+        Some(Keycode::Space) => emulator.set_action_button(ActionButton::Select, pressed),
+        Some(Keycode::Return) => emulator.set_action_button(ActionButton::Start, pressed),
+        _ => {}
+    }
 }

@@ -2265,6 +2265,7 @@ impl CPU {
                 bus.cycle(8);
 
                 if bus.interrupts.interrupt_flag(InterruptType::VBlank) {
+                    // println!("VBlank interrupt!");
                     self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0040;
                     bus.interrupts.unflag_interrupt(InterruptType::VBlank);
@@ -2272,6 +2273,7 @@ impl CPU {
                 }
 
                 if bus.interrupts.interrupt_flag(InterruptType::LCD) {
+                    // println!("LCD interrupt!");
                     self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0048;
                     bus.interrupts.unflag_interrupt(InterruptType::LCD);
@@ -2279,6 +2281,7 @@ impl CPU {
                 }
 
                 if bus.interrupts.interrupt_flag(InterruptType::Timer) {
+                    // println!("Timer interrupt!");
                     self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0050;
                     bus.interrupts.unflag_interrupt(InterruptType::Timer);
@@ -2293,6 +2296,7 @@ impl CPU {
                 }
 
                 if bus.interrupts.interrupt_flag(InterruptType::Joypad) {
+                    // println!("Joypad interrupt!");
                     self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0060;
                     bus.interrupts.unflag_interrupt(InterruptType::Joypad);

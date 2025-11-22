@@ -12,6 +12,7 @@ const UNUSED_START: u16 = 0xFEA0;
 const IO_START: u16 = 0xFF00;
 const HRAM_START: u16 = 0xFF80;
 
+const REG_JOYP: u16 = 0xFF00;
 const REG_SB: u16 = 0xFF01;
 const REG_SC: u16 = 0xFF02;
 
@@ -71,6 +72,7 @@ impl <'a> Bus<'a> {
             ECHO_START..OAM_START => self.wram[(address - ECHO_START) as usize],
             OAM_START..UNUSED_START => self.oam[(address - OAM_START) as usize],
 
+            REG_JOYP => self.joypad.read(),
             REG_SB => self.serial.data(),
             REG_SC => self.serial.control(),
 
@@ -119,6 +121,7 @@ impl <'a> Bus<'a> {
             ECHO_START..OAM_START => self.wram[(address - ECHO_START) as usize] = value,
             OAM_START..UNUSED_START => self.oam[(address - OAM_START) as usize] = value,
 
+            REG_JOYP => self.joypad.write(value),
             REG_SB => self.serial.set_data(value),
             REG_SC => self.serial.set_control(value),
 
@@ -172,6 +175,11 @@ impl <'a> Bus<'a> {
         if self.ppu.vblank_interrupt() {
             self.interrupts.set_flag(InterruptType::VBlank);
             self.ppu.set_vblank_interrupt(false);
+        }
+
+        if self.joypad.interrupt() {
+            self.interrupts.set_flag(InterruptType::Joypad);
+            self.joypad.set_interrupt(false);
         }
     }
 }

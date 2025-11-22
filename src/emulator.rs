@@ -8,6 +8,8 @@ mod ppu;
 mod serial;
 mod timer;
 
+pub(super) use joypad::{ActionButton, DirectionButton};
+
 use std::path::Path;
 
 use bus::Bus;
@@ -106,5 +108,13 @@ impl Emulator {
         let ticks = self.cpu.execute(bus).map_err(EmulatorError::CPU)?;
 
         Ok(ticks)
+    }
+
+    pub(super) fn set_action_button(&mut self, button: ActionButton, pressed: bool) {
+        self.joypad.set_action_button(button, pressed);
+    }
+
+    pub(super) fn set_direction_button(&mut self, button: DirectionButton, pressed: bool) {
+        self.joypad.set_direction_button(button, pressed);
     }
 }
