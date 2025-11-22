@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
-use super::{OAM, VRAM};
+use super::{Oam, Vram};
 
 const VRAM_SIZE: usize = 0x2000;
 const OAM_SIZE: usize = 0xA0;
@@ -25,7 +25,7 @@ const BLACK: (u8, u8, u8) = (0, 0, 0);
 
 pub(super) type FrameBuffer = [u8; SCREEN_WIDTH * SCREEN_HEIGHT * 3];
 
-pub(super) struct PPU {
+pub(super) struct Ppu {
     frame_buffer: FrameBuffer,
     regs: Registers,
     bg_fetcher: BackgroundFetcher,
@@ -40,7 +40,7 @@ pub(super) struct PPU {
     lcd_state: LcdState,
 }
 
-impl PPU {
+impl Ppu {
     pub(super) fn new() -> Self {
         Self {
             frame_buffer: [0; SCREEN_WIDTH * SCREEN_HEIGHT * 3],
@@ -177,7 +177,7 @@ impl PPU {
         self.vblank_interrupt = value;
     }
 
-    pub(super) fn tick(&mut self, vram: &VRAM, oam: &OAM) {
+    pub(super) fn tick(&mut self, vram: &Vram, oam: &Oam) {
         // LCD has been disabled, reset and pause the PPU
         if self.lcd_state == LcdState::Enabled && !self.regs.lcd_control.lcd_enabled() {
             self.lcd_state = LcdState::Disabled;
@@ -348,14 +348,10 @@ impl PPU {
                             return;
                         }
 
-                        match self.bg_fetcher.bg_queue.pop_front() {
-                            Some(bg_pixel) => {
-                                // Mix background and sprite pixels
-                                let (pixel, palette, is_sprite) = match self
-                                    .sprite_fetcher
-                                    .sprite_queue
-                                    .pop_front()
-                                {
+                        if let Some(bg_pixel) = self.bg_fetcher.bg_queue.pop_front() {
+                            // Mix background and sprite pixels
+                            let (pixel, palette, is_sprite) =
+                                match self.sprite_fetcher.sprite_queue.pop_front() {
                                     Some(sprite_pixel) => {
                                         let sprite_palette = match sprite_pixel.palette {
                                             Palette::OBP0 => self.regs.obj_palette_0,
@@ -383,41 +379,39 @@ impl PPU {
                                     None => (bg_pixel, self.regs.bg_palette, false),
                                 };
 
-                                // Convert pixel color to RGB
-                                let (r, g, b) =
-                                    if is_sprite || self.regs.lcd_control.bg_window_enabled() {
-                                        pixel.into_color(palette)
-                                    } else {
-                                        WHITE
-                                    };
+                            // Convert pixel color to RGB
+                            let (r, g, b) =
+                                if is_sprite || self.regs.lcd_control.bg_window_enabled() {
+                                    pixel.as_color(palette)
+                                } else {
+                                    WHITE
+                                };
 
-                                // Place each RGB channel into the frame buffer, skip if we're on the first frame after enabling
-                                if self.lcd_state == LcdState::Enabled {
-                                    let row = self.regs.lcd_y as usize;
-                                    let column = self.regs.lcd_x as usize;
-                                    let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
+                            // Place each RGB channel into the frame buffer, skip if we're on the first frame after enabling
+                            if self.lcd_state == LcdState::Enabled {
+                                let row = self.regs.lcd_y as usize;
+                                let column = self.regs.lcd_x as usize;
+                                let pixel_address = (row * SCREEN_WIDTH * 3) + (column * 3);
 
-                                    self.frame_buffer[pixel_address] = r;
-                                    self.frame_buffer[pixel_address + 1] = g;
-                                    self.frame_buffer[pixel_address + 2] = b;
-                                }
-
-                                self.regs.lcd_x += 1;
-
-                                // Move on to HBlank
-                                if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
-                                    self.bg_fetcher.reset();
-                                    self.sprite_fetcher.sprite_queue.clear();
-                                    self.sprite_fetcher.prev_sprite = None;
-
-                                    self.regs.lcd_x = 0;
-                                    self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
-                                    self.draw_time = 0;
-
-                                    self.update_stat_interrupt();
-                                }
+                                self.frame_buffer[pixel_address] = r;
+                                self.frame_buffer[pixel_address + 1] = g;
+                                self.frame_buffer[pixel_address + 2] = b;
                             }
-                            None => return,
+
+                            self.regs.lcd_x += 1;
+
+                            // Move on to HBlank
+                            if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
+                                self.bg_fetcher.reset();
+                                self.sprite_fetcher.sprite_queue.clear();
+                                self.sprite_fetcher.prev_sprite = None;
+
+                                self.regs.lcd_x = 0;
+                                self.regs.lcd_status.set_ppu_mode(RenderMode::HBlank);
+                                self.draw_time = 0;
+
+                                self.update_stat_interrupt();
+                            }
                         }
                     }
                 }
@@ -557,7 +551,7 @@ impl LcdStatus {
     }
 
     fn set_lyc_ly_equal(&mut self, value: bool) {
-        self.0 = self.0 & !0x04;
+        self.0 &= !0x04;
 
         if value {
             self.0 |= 0x04;
@@ -625,7 +619,7 @@ enum ColorIndex {
 }
 
 impl ColorIndex {
-    fn into_color(&self, palette_data: u8) -> (u8, u8, u8) {
+    fn as_color(&self, palette_data: u8) -> (u8, u8, u8) {
         let shift = (*self as u8) * 2;
         let mask = 0x03 << shift;
         let id = (palette_data & mask) >> shift;
@@ -701,7 +695,7 @@ impl BackgroundFetcher {
                 } else {
                     let bg_address = regs.lcd_control.bg_tile_map();
                     let x = self.x_position.wrapping_add(regs.scroll_x / 8) as usize & 0x1F;
-                    let y = 32 * ((regs.lcd_y.wrapping_add(regs.scroll_y) & 0xFF) / 8) as usize;
+                    let y = 32 * (regs.lcd_y.wrapping_add(regs.scroll_y) / 8) as usize;
 
                     vram[bg_address + ((x + y) & 0x03FF)]
                 };
@@ -1029,7 +1023,7 @@ impl SpriteFetcher {
 
             let sprite_x = oam[i + 1];
 
-            if sprite_x <= 0 {
+            if sprite_x == 0 {
                 continue;
             }
 

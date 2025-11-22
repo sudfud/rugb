@@ -22,7 +22,7 @@ const SCREEN_HEIGHT: usize = 144;
 #[derive(Debug)]
 enum RugbError {
     Emulator(EmulatorError),
-    SDL(String),
+    Sdl(String),
 }
 
 impl std::fmt::Display for RugbError {
@@ -32,7 +32,7 @@ impl std::fmt::Display for RugbError {
             "Error: {}",
             match self {
                 Self::Emulator(e) => e.to_string(),
-                Self::SDL(s) => s.clone(),
+                Self::Sdl(s) => s.clone(),
             }
         )
     }
@@ -48,29 +48,29 @@ fn main() -> Result<(), RugbError> {
         let mut emulator = Emulator::new(Path::new(&args[1])).map_err(RugbError::Emulator)?;
 
         // SDL Setup
-        let sdl_context = sdl2::init().map_err(RugbError::SDL)?;
-        let video_subsystem = sdl_context.video().map_err(RugbError::SDL)?;
+        let sdl_context = sdl2::init().map_err(RugbError::Sdl)?;
+        let video_subsystem = sdl_context.video().map_err(RugbError::Sdl)?;
 
         let mut window = video_subsystem
             .window("demo", SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
             .position_centered()
             .resizable()
             .build()
-            .map_err(|e| RugbError::SDL(e.to_string()))?;
+            .map_err(|e| RugbError::Sdl(e.to_string()))?;
 
         window
             .set_minimum_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
-            .map_err(|e| RugbError::SDL(e.to_string()))?;
+            .map_err(|e| RugbError::Sdl(e.to_string()))?;
 
         let mut canvas = window
             .into_canvas()
             .build()
-            .map_err(|e| RugbError::SDL(e.to_string()))?;
+            .map_err(|e| RugbError::Sdl(e.to_string()))?;
 
         canvas.set_draw_color(Color::BLACK);
         canvas
             .set_logical_size(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
-            .map_err(|e| RugbError::SDL(e.to_string()))?;
+            .map_err(|e| RugbError::Sdl(e.to_string()))?;
 
         let texture_creator = canvas.texture_creator();
         let mut texture = texture_creator
@@ -80,10 +80,10 @@ fn main() -> Result<(), RugbError> {
                 SCREEN_WIDTH as u32,
                 SCREEN_HEIGHT as u32,
             )
-            .map_err(|e| RugbError::SDL(e.to_string()))?;
+            .map_err(|e| RugbError::Sdl(e.to_string()))?;
 
         let mut current_time = Instant::now();
-        let mut event_pump = sdl_context.event_pump().map_err(RugbError::SDL)?;
+        let mut event_pump = sdl_context.event_pump().map_err(RugbError::Sdl)?;
         let mut tick_count = 0;
 
         'running: loop {
@@ -98,9 +98,9 @@ fn main() -> Result<(), RugbError> {
                     .with_lock(None, |pixels, _pitch| {
                         pixels.copy_from_slice(emulator.frame_buffer().as_slice());
                     })
-                    .map_err(RugbError::SDL)?;
+                    .map_err(RugbError::Sdl)?;
 
-                canvas.copy(&texture, None, None).map_err(RugbError::SDL)?;
+                canvas.copy(&texture, None, None).map_err(RugbError::Sdl)?;
 
                 canvas.present();
 

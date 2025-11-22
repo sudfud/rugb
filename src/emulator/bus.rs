@@ -1,8 +1,6 @@
 use super::dma::DmaState;
 use super::interrupts::InterruptType;
-use super::{
-    Cartridge, DMA, Emulator, HRAM, Interrupts, Joypad, OAM, PPU, Serial, Timer, VRAM, WRAM,
-};
+use super::{Cartridge, Dma, Hram, Interrupts, Joypad, Oam, Ppu, Serial, Timer, Vram, Wram};
 
 pub(super) const ROM_START: u16 = 0x0000;
 pub(super) const VRAM_START: u16 = 0x8000;
@@ -42,16 +40,16 @@ const REG_IE: u16 = 0xFFFF;
 
 pub(super) struct Bus<'a> {
     pub(super) cartridge: &'a mut Cartridge,
-    pub(super) dma: &'a mut DMA,
-    pub(super) hram: &'a mut HRAM,
+    pub(super) dma: &'a mut Dma,
+    pub(super) hram: &'a mut Hram,
     pub(super) interrupts: &'a mut Interrupts,
     pub(super) joypad: &'a mut Joypad,
-    pub(super) oam: &'a mut OAM,
-    pub(super) ppu: &'a mut PPU,
+    pub(super) oam: &'a mut Oam,
+    pub(super) ppu: &'a mut Ppu,
     pub(super) serial: &'a mut Serial,
     pub(super) timer: &'a mut Timer,
-    pub(super) vram: &'a mut VRAM,
-    pub(super) wram: &'a mut WRAM,
+    pub(super) vram: &'a mut Vram,
+    pub(super) wram: &'a mut Wram,
 }
 
 impl<'a> Bus<'a> {
@@ -175,7 +173,7 @@ impl<'a> Bus<'a> {
         }
 
         if self.ppu.lcd_interrupt() {
-            self.interrupts.set_flag(InterruptType::LCD);
+            self.interrupts.set_flag(InterruptType::Lcd);
             self.ppu.set_lcd_interrupt(false);
         }
 

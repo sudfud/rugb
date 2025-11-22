@@ -14,11 +14,11 @@ use std::path::Path;
 
 use bus::Bus;
 use cartridge::{Cartridge, CartridgeError};
-use cpu::{CPU, CPUError};
-use dma::DMA;
+use cpu::{Cpu, CpuError};
+use dma::Dma;
 use interrupts::Interrupts;
 use joypad::Joypad;
-use ppu::{FrameBuffer, PPU};
+use ppu::{FrameBuffer, Ppu};
 use serial::Serial;
 use timer::Timer;
 
@@ -27,15 +27,15 @@ const OAM_SIZE: usize = 0xA0;
 const VRAM_SIZE: usize = 0x2000;
 const WRAM_SIZE: usize = 0x2000;
 
-type HRAM = [u8; HRAM_SIZE];
-type OAM = [u8; OAM_SIZE];
-type VRAM = [u8; VRAM_SIZE];
-type WRAM = [u8; WRAM_SIZE];
+type Hram = [u8; HRAM_SIZE];
+type Oam = [u8; OAM_SIZE];
+type Vram = [u8; VRAM_SIZE];
+type Wram = [u8; WRAM_SIZE];
 
 #[derive(Debug)]
 pub(super) enum EmulatorError {
     Cartridge(CartridgeError),
-    CPU(CPUError),
+    Cpu(CpuError),
 }
 
 impl std::fmt::Display for EmulatorError {
@@ -45,7 +45,7 @@ impl std::fmt::Display for EmulatorError {
             "{}",
             match self {
                 Self::Cartridge(e) => e.to_string(),
-                Self::CPU(e) => e.to_string(),
+                Self::Cpu(e) => e.to_string(),
             }
         )
     }
@@ -53,17 +53,17 @@ impl std::fmt::Display for EmulatorError {
 
 pub(super) struct Emulator {
     cartridge: Cartridge,
-    cpu: CPU,
-    dma: DMA,
-    hram: HRAM,
+    cpu: Cpu,
+    dma: Dma,
+    hram: Hram,
     interrupts: Interrupts,
     joypad: Joypad,
-    oam: OAM,
-    ppu: PPU,
+    oam: Oam,
+    ppu: Ppu,
     serial: Serial,
     timer: Timer,
-    vram: VRAM,
-    wram: WRAM,
+    vram: Vram,
+    wram: Wram,
 }
 
 impl Emulator {
@@ -72,13 +72,13 @@ impl Emulator {
 
         Ok(Self {
             cartridge,
-            cpu: CPU::new(),
-            dma: DMA::new(),
+            cpu: Cpu::new(),
+            dma: Dma::new(),
             hram: [0; HRAM_SIZE],
             interrupts: Interrupts::new(),
             joypad: Joypad::new(),
             oam: [0; OAM_SIZE],
-            ppu: PPU::new(),
+            ppu: Ppu::new(),
             serial: Serial::new(),
             timer: Timer::new(),
             vram: [0; VRAM_SIZE],
@@ -87,7 +87,7 @@ impl Emulator {
     }
 
     pub(super) fn frame_buffer(&self) -> &FrameBuffer {
-        &self.ppu.frame_buffer()
+        self.ppu.frame_buffer()
     }
 
     pub(super) fn step(&mut self) -> Result<u32, EmulatorError> {
@@ -105,7 +105,7 @@ impl Emulator {
             wram: &mut self.wram,
         };
 
-        let ticks = self.cpu.execute(bus).map_err(EmulatorError::CPU)?;
+        let ticks = self.cpu.execute(bus).map_err(EmulatorError::Cpu)?;
 
         Ok(ticks)
     }

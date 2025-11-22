@@ -6,24 +6,24 @@ use super::interrupts::InterruptType;
 use registers::{FlagMask, Registers};
 
 #[derive(Debug)]
-pub(super) enum CPUError {
+pub(crate) enum CpuError {
     UnsupportedOpcode(u8, u16),
 }
 
-impl std::fmt::Display for CPUError {
+impl std::fmt::Display for CpuError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{}",
             match self {
                 Self::UnsupportedOpcode(code, address) =>
-                    format!("Unsupported opcode {:02X} at address {:04X}", code, address),
+                    format!("Unsupported opcode {code:02X} at address {address:04X}"),
             }
         )
     }
 }
 
-pub(super) struct CPU {
+pub(super) struct Cpu {
     registers: Registers,
     interrupt_master_enable: bool,
     ei_timer: u8,
@@ -31,7 +31,7 @@ pub(super) struct CPU {
     halted: bool,
 }
 
-impl CPU {
+impl Cpu {
     pub(super) fn new() -> Self {
         Self {
             registers: Registers::new(),
@@ -42,7 +42,7 @@ impl CPU {
         }
     }
 
-    pub(super) fn execute(&mut self, mut bus: Bus) -> Result<u32, CPUError> {
+    pub(super) fn execute(&mut self, mut bus: Bus) -> Result<u32, CpuError> {
         self.update_ime();
 
         if self.handle_interrupts(&mut bus) {
@@ -65,7 +65,8 @@ impl CPU {
         Ok(tick_count)
     }
 
-    fn step(&mut self, bus: &mut Bus) -> Result<(), CPUError> {
+    #[allow(clippy::self_assignment)]
+    fn step(&mut self, bus: &mut Bus) -> Result<(), CpuError> {
         let opcode = self.next_byte(bus);
 
         match opcode {
@@ -1047,7 +1048,7 @@ impl CPU {
             // RST 7
             0xFF => self.rst(bus, 0x0038),
 
-            _ => return Err(CPUError::UnsupportedOpcode(opcode, self.registers.pc)),
+            _ => return Err(CpuError::UnsupportedOpcode(opcode, self.registers.pc)),
         }
 
         Ok(())
@@ -2306,10 +2307,10 @@ impl CPU {
                     return true;
                 }
 
-                if bus.interrupts.interrupt_flag(InterruptType::LCD) {
+                if bus.interrupts.interrupt_flag(InterruptType::Lcd) {
                     self.push_stack(bus, self.registers.pc);
                     self.registers.pc = 0x0048;
-                    bus.interrupts.unflag_interrupt(InterruptType::LCD);
+                    bus.interrupts.unflag_interrupt(InterruptType::Lcd);
                     return true;
                 }
 

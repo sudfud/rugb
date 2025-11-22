@@ -1,13 +1,13 @@
 use super::bus::{ECHO_START, OAM_START, RAM_START, ROM_START, VRAM_START, WRAM_START};
-use super::{Cartridge, OAM, VRAM, WRAM};
+use super::{Cartridge, Oam, Vram, Wram};
 
-pub(super) struct DMA {
+pub(super) struct Dma {
     state: DmaState,
     counter: u8,
     current_address: u16,
 }
 
-impl DMA {
+impl Dma {
     pub(super) fn new() -> Self {
         Self {
             state: DmaState::Idle,
@@ -25,7 +25,7 @@ impl DMA {
         self.current_address = address;
     }
 
-    pub(super) fn tick(&mut self, cartridge: &Cartridge, vram: &VRAM, wram: &WRAM, oam: &mut OAM) {
+    pub(super) fn tick(&mut self, cartridge: &Cartridge, vram: &Vram, wram: &Wram, oam: &mut Oam) {
         match self.state {
             DmaState::Idle => {}
             DmaState::Initializing => {
@@ -61,7 +61,7 @@ impl DMA {
         }
     }
 
-    fn read(&self, cartridge: &Cartridge, vram: &VRAM, wram: &WRAM) -> u8 {
+    fn read(&self, cartridge: &Cartridge, vram: &Vram, wram: &Wram) -> u8 {
         match self.current_address {
             ROM_START..VRAM_START => cartridge.read_rom(self.current_address),
             VRAM_START..RAM_START => vram[(self.current_address - VRAM_START) as usize],
@@ -71,7 +71,7 @@ impl DMA {
         }
     }
 
-    fn write(&self, address: u16, byte: u8, oam: &mut OAM) {
+    fn write(&self, address: u16, byte: u8, oam: &mut Oam) {
         oam[(address - OAM_START) as usize] = byte;
     }
 }

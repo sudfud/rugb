@@ -4,11 +4,11 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use mbc::MBC;
+use mbc::Mbc;
 use mbc::mbc0::MBC0;
 
 #[derive(Debug)]
-pub(super) enum CartridgeError {
+pub(crate) enum CartridgeError {
     IO(std::io::Error),
 }
 
@@ -27,7 +27,7 @@ impl std::fmt::Display for CartridgeError {
 impl std::error::Error for CartridgeError {}
 
 pub(super) struct Cartridge {
-    mbc: Box<dyn MBC>,
+    mbc: Box<dyn Mbc>,
 }
 
 impl Cartridge {
