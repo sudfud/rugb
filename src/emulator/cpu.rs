@@ -2305,29 +2305,6 @@ impl CPU {
     }
 }
 
-// impl std::fmt::Display for CPU {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(
-//             f,
-//             "A:{:02X} F:{:02X} B:{:02X} C:{:02X} D:{:02X} E:{:02X} H:{:02X} L:{:02X} SP:{:04X} PC:{:04X} PCMEM:{:02X},{:02X},{:02X},{:02X}",
-//             self.registers.a,
-//             self.registers.f,
-//             self.registers.b,
-//             self.registers.c,
-//             self.registers.d,
-//             self.registers.e,
-//             self.registers.h,
-//             self.registers.l,
-//             self.registers.sp,
-//             self.registers.pc,
-//             self.read(self.registers.pc),
-//             self.read(self.registers.pc.wrapping_add(1)),
-//             self.read(self.registers.pc.wrapping_add(2)),
-//             self.read(self.registers.pc.wrapping_add(3))
-//         )
-//     }
-// }
-
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Condition {

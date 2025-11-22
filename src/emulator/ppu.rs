@@ -34,7 +34,8 @@ pub(super) struct PPU {
     counter: u32,
     draw_time: u32,
     stat_interrupt_line: bool,
-    interrupt: bool,
+    lcd_interrupt: bool,
+    vblank_interrupt: bool,
     wy_latch: bool,
     lcd_state: LcdState
 }
@@ -50,7 +51,8 @@ impl PPU {
             counter: 0,
             draw_time: 0,
             stat_interrupt_line: false,
-            interrupt: false,
+            lcd_interrupt: false,
+            vblank_interrupt: false,
             wy_latch: false,
             lcd_state: LcdState::Enabled
         }
@@ -157,12 +159,20 @@ impl PPU {
         self.check_wy_latch();
     }
 
-    pub(super) fn interrupt(&self) -> bool {
-        self.interrupt
+    pub(super) fn lcd_interrupt(&self) -> bool {
+        self.lcd_interrupt
     }
 
-    pub(super) fn set_interrupt(&mut self, value: bool) {
-        self.interrupt = value;
+    pub(super) fn set_lcd_interrupt(&mut self, value: bool) {
+        self.lcd_interrupt = value;
+    }
+
+    pub(super) fn vblank_interrupt(&self) -> bool {
+        self.vblank_interrupt
+    }
+
+    pub(super) fn set_vblank_interrupt(&mut self, value: bool) {
+        self.vblank_interrupt = value;
     }
 
     pub(super) fn tick(&mut self, vram: &VRAM, oam: &OAM) {
@@ -190,10 +200,14 @@ impl PPU {
             return;
         }
 
-        // LCD has been enabled, first frame after enabling will be skipped
-        if self.lcd_state == LcdState::Disabled && self.regs.lcd_control.lcd_enabled() {
-            self.lcd_state = LcdState::Enabling;
-            self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
+        if self.lcd_state == LcdState::Disabled {
+            if self.regs.lcd_control.lcd_enabled() {
+                // LCD has been enabled, first frame after enabling will be skipped
+                self.lcd_state = LcdState::Enabling;
+                self.regs.lcd_status.set_ppu_mode(RenderMode::ScanOAM);
+            } else {
+                return;
+            }
         }
 
         self.counter += 1;
@@ -217,6 +231,7 @@ impl PPU {
                     if self.regs.lcd_y as usize >= SCREEN_HEIGHT {
                         self.wy_latch = false;
                         self.bg_fetcher.window_line_counter = 0;
+                        self.vblank_interrupt = true;
                         RenderMode::VBlank
                     } else {
                         RenderMode::ScanOAM
@@ -394,7 +409,7 @@ impl PPU {
             || (status.hblank_mode_select() && status.ppu_mode() == RenderMode::HBlank);
 
         if !prev && self.stat_interrupt_line {
-            self.interrupt = true;
+            self.lcd_interrupt = true;
         }
     }
 
@@ -406,7 +421,7 @@ impl PPU {
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LcdState {
     Enabled,
     Disabled,

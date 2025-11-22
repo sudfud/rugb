@@ -164,9 +164,14 @@ impl <'a> Bus<'a> {
             self.dma.tick(self.cartridge, self.vram, self.wram, self.oam);
         }
 
-        if self.ppu.interrupt() {
+        if self.ppu.lcd_interrupt() {
             self.interrupts.set_flag(InterruptType::LCD);
-            self.ppu.set_interrupt(false);
+            self.ppu.set_lcd_interrupt(false);
+        }
+
+        if self.ppu.vblank_interrupt() {
+            self.interrupts.set_flag(InterruptType::VBlank);
+            self.ppu.set_vblank_interrupt(false);
         }
     }
 }

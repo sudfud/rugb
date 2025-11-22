@@ -3,6 +3,7 @@ mod emulator;
 extern crate sdl2;
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use sdl2::event::Event;
 use sdl2::pixels::{Color, PixelFormatEnum};
@@ -10,7 +11,8 @@ use sdl2::render::TextureAccess;
 
 use emulator::{Emulator, EmulatorError};
 
-const FRAME_TIME: u32 = 70224;
+const FRAME_TICKS: u32 = 70224;
+const FRAME_TIME: Duration = Duration::from_micros(16750);
 
 const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
@@ -74,14 +76,15 @@ fn main() -> Result<(), RugbError> {
             )
             .map_err(|e| RugbError::SDL(e.to_string()))?;
 
+        let mut current_time = Instant::now();
         let mut event_pump = sdl_context.event_pump().map_err(RugbError::SDL)?;
         let mut tick_count = 0;
 
         'running: loop {
             tick_count += emulator.step().map_err(RugbError::Emulator)?;
 
-            if tick_count >= FRAME_TIME {
-                tick_count -= FRAME_TIME;
+            if tick_count >= FRAME_TICKS {
+                tick_count -= FRAME_TICKS;
 
                 canvas.clear();
 
@@ -92,6 +95,13 @@ fn main() -> Result<(), RugbError> {
                 canvas.copy(&texture, None, None).map_err(RugbError::SDL)?;
 
                 canvas.present();
+
+                if Instant::now() - current_time < FRAME_TIME {
+                    let sleep_time = FRAME_TIME - (Instant::now() - current_time);
+                    std::thread::sleep(sleep_time);
+                }
+
+                current_time = Instant::now();
             }
 
             for event in event_pump.poll_iter() {
