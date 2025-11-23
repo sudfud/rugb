@@ -44,7 +44,6 @@ fn main() -> Result<(), RugbError> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() == 2 {
-        // let lcd = Rc::new(RefCell::new([0; SCREEN_WIDTH * SCREEN_HEIGHT * 3]));
         let mut emulator = Emulator::new(Path::new(&args[1])).map_err(RugbError::Emulator)?;
 
         // SDL Setup

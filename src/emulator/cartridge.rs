@@ -5,11 +5,13 @@ use std::io::Read;
 use std::path::Path;
 
 use mbc::Mbc;
-use mbc::mbc0::MBC0;
+use mbc::mbc0::Mbc0;
+use mbc::mbc1::Mbc1;
 
 #[derive(Debug)]
 pub(crate) enum CartridgeError {
-    IO(std::io::Error),
+    InvalidCartridge,
+    Io(std::io::Error)
 }
 
 impl std::fmt::Display for CartridgeError {
@@ -18,7 +20,8 @@ impl std::fmt::Display for CartridgeError {
             f,
             "{}",
             match self {
-                Self::IO(e) => e.to_string(),
+                Self::InvalidCartridge => String::from("Invalid cartridge"),
+                Self::Io(e) => e.to_string(),
             }
         )
     }
@@ -52,13 +55,16 @@ impl TryFrom<&Path> for Cartridge {
     type Error = CartridgeError;
 
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        let mut memory: Vec<u8> = vec![0; 0x1_0000];
-        let mut file = File::open(value).map_err(CartridgeError::IO)?;
+        let memory = std::fs::read(value).map_err(CartridgeError::Io)?;
+        let mbc: Box<dyn Mbc> = match memory.get(0x0147) {
+            Some(cart_type) => match cart_type {
+                0x00 => Box::new(Mbc0::new(memory)),
+                0x01..=0x02 => Box::new(Mbc1::new(memory)?),
+                _ => return Err(CartridgeError::InvalidCartridge)
+            },
+            None => return Err(CartridgeError::InvalidCartridge)
+        };
 
-        file.read(&mut memory).map_err(CartridgeError::IO)?;
-
-        Ok(Self {
-            mbc: Box::new(MBC0::new(memory)),
-        })
+        Ok(Self { mbc })
     }
 }
