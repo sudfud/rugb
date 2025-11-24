@@ -196,7 +196,7 @@ impl Ppu {
             self.sprite_fetcher.counter = 0;
             self.sprite_fetcher.current_sprite = None;
             self.sprite_fetcher.prev_sprite = None;
-            self.sprite_fetcher.sprite_queue.clear();
+            self.sprite_fetcher.sprite_queue = VecDeque::from(vec![SpritePixel::default(); 8]);
             self.sprite_fetcher.state = FetcherState::TileId;
 
             return;
@@ -353,6 +353,8 @@ impl Ppu {
                             let (pixel, palette, is_sprite) =
                                 match self.sprite_fetcher.sprite_queue.pop_front() {
                                     Some(sprite_pixel) => {
+                                        self.sprite_fetcher.sprite_queue.push_back(SpritePixel::default());
+
                                         let sprite_palette = match sprite_pixel.palette {
                                             Palette::OBP0 => self.regs.obj_palette_0,
                                             Palette::OBP1 => self.regs.obj_palette_1,
@@ -403,7 +405,7 @@ impl Ppu {
                             // Move on to HBlank
                             if self.regs.lcd_x >= SCREEN_WIDTH as u8 {
                                 self.bg_fetcher.reset();
-                                self.sprite_fetcher.sprite_queue.clear();
+                                self.sprite_fetcher.sprite_queue = VecDeque::from(vec![SpritePixel::default(); 8]);
                                 self.sprite_fetcher.prev_sprite = None;
 
                                 self.regs.lcd_x = 0;
@@ -850,6 +852,16 @@ struct SpritePixel {
     priority: SpritePriority,
 }
 
+impl Default for SpritePixel {
+    fn default() -> Self {
+        Self {
+            color: ColorIndex::Zero,
+            palette: Palette::OBP0,
+            priority: SpritePriority::Back
+        }
+    }
+}
+
 struct SpriteFetcher {
     counter: u8,
     tile_index: u8,
@@ -873,7 +885,7 @@ impl SpriteFetcher {
             sprite_buffer: Vec::with_capacity(10),
             current_sprite: None,
             prev_sprite: None,
-            sprite_queue: VecDeque::new(),
+            sprite_queue: VecDeque::from(vec![SpritePixel::default(); 8]),
         }
     }
 
@@ -950,34 +962,20 @@ impl SpriteFetcher {
 
                     self.tile_data_high = vram[address + 2 * y + 1];
 
-                    let start_index = if sprite.x < TILE_SIZE_PIXELS {
-                        TILE_SIZE_PIXELS - sprite.x
-                    } else if let Some(prev_sprite) = self.prev_sprite {
-                        // Remove transparent pixels from previous sprite that overlap with current sprite
-                        if sprite.x - prev_sprite.x < TILE_SIZE_PIXELS {
-                            while let Some(pixel) = self.sprite_queue.back().copied() {
-                                if pixel.color == ColorIndex::Zero {
-                                    self.sprite_queue.pop_back();
-                                } else {
-                                    break;
-                                }
-                            }
-                            self.sprite_queue.len() as u8
-                        } else {
-                            0
-                        }
+                    let end_index = if sprite.x < TILE_SIZE_PIXELS {
+                        sprite.x
                     } else {
-                        0
+                        TILE_SIZE_PIXELS
                     };
 
                     // Convert tile data to pixels and add them to the sprite queue
                     let range: Box<dyn Iterator<Item = u8>> = if sprite.flip_x() {
-                        Box::new(start_index..TILE_SIZE_PIXELS)
+                        Box::new(0..end_index)
                     } else {
-                        Box::new((start_index..TILE_SIZE_PIXELS).rev())
+                        Box::new((0..end_index).rev())
                     };
 
-                    for bit in range {
+                    for (bit, i) in range.zip(0..end_index) {
                         let mask = 1 << bit;
                         let color_bit_low = (self.tile_data_low & mask) >> bit;
                         let color_bit_high = (self.tile_data_high & mask) >> bit;
@@ -988,13 +986,18 @@ impl SpriteFetcher {
                             _ => ColorIndex::Three,
                         };
 
-                        let sprite_pixel = SpritePixel {
+                        let mut sprite_pixel = SpritePixel {
                             color,
                             palette: sprite.palette(),
                             priority: sprite.priority(),
                         };
 
-                        self.sprite_queue.push_back(sprite_pixel);
+                        // println!("{i}");
+                        if self.sprite_queue[i as usize].color == ColorIndex::Zero {
+                            std::mem::swap(&mut self.sprite_queue[i as usize], &mut sprite_pixel);
+                        }
+
+                        // self.sprite_queue.push_back(sprite_pixel);
                     }
 
                     self.prev_sprite = self.current_sprite;
@@ -1023,9 +1026,9 @@ impl SpriteFetcher {
 
             let sprite_x = oam[i + 1];
 
-            if sprite_x == 0 {
-                continue;
-            }
+            // if sprite_x == 0 {
+            //     continue;
+            // }
 
             // Add this sprite to the buffer
             let oam_index = i as u8 / 4;
