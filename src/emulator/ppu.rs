@@ -992,12 +992,9 @@ impl SpriteFetcher {
                             priority: sprite.priority(),
                         };
 
-                        // println!("{i}");
                         if self.sprite_queue[i as usize].color == ColorIndex::Zero {
                             std::mem::swap(&mut self.sprite_queue[i as usize], &mut sprite_pixel);
                         }
-
-                        // self.sprite_queue.push_back(sprite_pixel);
                     }
 
                     self.prev_sprite = self.current_sprite;
@@ -1025,10 +1022,6 @@ impl SpriteFetcher {
             }
 
             let sprite_x = oam[i + 1];
-
-            // if sprite_x == 0 {
-            //     continue;
-            // }
 
             // Add this sprite to the buffer
             let oam_index = i as u8 / 4;
