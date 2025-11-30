@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 const FREQ_MAX: u16 = 2048;
 
 pub(super) struct Apu {
@@ -6,7 +8,8 @@ pub(super) struct Apu {
     master_control: MasterControl,
     panning: Panning,
     master_volume: MasterVolume,
-    channel_2: PulseChannel
+    channel_2: PulseChannel,
+    samples: VecDeque<i16>
 }
 
 impl Apu {
@@ -30,12 +33,14 @@ impl Apu {
                 current_direction: Direction::Decreasing,
                 period: 0x07FF,
                 phase: 0
-            }
+            },
+            samples: VecDeque::new()
         }
     }
 
     pub(super) fn tick(&mut self, div: u8) {
         if !self.master_control.audio_enabled() {
+            self.samples.push_back(0);
             return;
         }
 
@@ -56,6 +61,8 @@ impl Apu {
         }
 
         self.prev_div = div;
+
+        let digital_sample = self.channel_2.sample();
     }
 
     pub(super) fn master_control(&self) -> u8 {
