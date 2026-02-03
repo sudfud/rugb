@@ -47,7 +47,7 @@ impl Mbc1 {
                 ram: vec![0; ram_banks * RAM_BANK_SIZE],
                 rom_banks,
                 ram_banks,
-                rom_bank_number: 0,
+                rom_bank_number: 1,
                 ram_bank_number: 0,
                 bank_mode: BankMode::Simple,
                 enable_external_ram: false
