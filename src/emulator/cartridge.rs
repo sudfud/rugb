@@ -59,7 +59,7 @@ impl TryFrom<&Path> for Cartridge {
         let mbc: Box<dyn Mbc> = match memory.get(0x0147) {
             Some(cart_type) => match cart_type {
                 0x00 => Box::new(Mbc0::new(memory)),
-                0x01..=0x02 => Box::new(Mbc1::new(memory)?),
+                0x01..=0x03 => Box::new(Mbc1::new(memory)?),
                 _ => return Err(CartridgeError::InvalidCartridge)
             },
             None => return Err(CartridgeError::InvalidCartridge)
