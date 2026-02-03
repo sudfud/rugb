@@ -3,41 +3,57 @@ mod channels;
 use channels::{ChannelType, PulseChannel};
 
 pub(super) struct Apu {
+    enabled: bool,
     div: u8,
     div_apu_counter: u8,
 
-    control: AudioMasterControl,
+    // control: AudioMasterControl,
     panning: Panning,
     master_volume: AudioMasterVolume,
 
-    channel_2: PulseChannel
+    channel_2: PulseChannel,
+
+    wave_ram: [u8; 16]
 }
 
 impl Apu {
     pub(super) fn new() -> Self {
         Self {
+            enabled: true,
             div: 0, // Previous value of timer's DIV register
             div_apu_counter: 0,
 
-            control: AudioMasterControl(0xF1),
+            // control: AudioMasterControl(0xF1),
             panning: Panning(0xF3),
             master_volume: AudioMasterVolume(0x77),
 
-            channel_2: PulseChannel::new()
+            channel_2: PulseChannel::new(false),
+
+            wave_ram: [0x00; 16]
         }
     }
 
     pub(super) fn control(&self) -> u8 {
-        self.control.0
+        let mut data = 0x70;
+
+        if self.enabled {
+            data |= 0x80;
+        }
+
+        if self.channel_2.enabled() {
+            data |= 0x02;
+        }
+
+        data
     }
 
     pub(super) fn set_control(&mut self, value: u8) {
-        self.control.0 = (value & AUDIO_ENABLE_FLAG) | (self.control.0 & !AUDIO_ENABLE_FLAG);
+        self.enabled = value & 0x80 > 0;
 
-        if !self.control.is_powered_on() {
-            self.control.0 = 0x00;
+        if !self.enabled {
             self.panning.0 = 0x00;
             self.master_volume.0 = 0x00;
+            self.channel_2.set_enabled(false);
         }
     }
 
@@ -46,7 +62,7 @@ impl Apu {
     }
 
     pub(super) fn set_panning(&mut self, value: u8) {
-        if self.control.is_powered_on() {
+        if self.enabled {
             self.panning.0 = value;
         }
     }
@@ -56,7 +72,7 @@ impl Apu {
     }
 
     pub(super) fn set_master_volume(&mut self, value: u8) {
-        if self.control.is_powered_on() {
+        if self.enabled {
             self.master_volume.0 = value;
         }
     }
@@ -66,7 +82,7 @@ impl Apu {
     }
 
     pub(super) fn set_channel_2_duty_length(&mut self, value: u8) {
-        if self.control.is_powered_on() {
+        if self.enabled {
             self.channel_2.set_duty_length(value);
         }
     }
@@ -79,12 +95,12 @@ impl Apu {
         self.channel_2.set_volume(value);
 
         if !self.channel_2.dac_enabled() {
-            self.control.set_channel_on(ChannelType::Pulse2, false);
+            self.channel_2.set_enabled(false);
         }
     }
 
     pub(super) fn set_channel_2_period_low(&mut self, value: u8) {
-        if self.control.is_powered_on() {
+        if self.enabled {
             self.channel_2.set_period_low(value);
         }
     }
@@ -94,20 +110,23 @@ impl Apu {
     }
 
     pub(super) fn set_channel_2_control(&mut self, value: u8) {
-        if !self.control.is_powered_on() {
+        if !self.enabled {
             return;
         }
 
         self.channel_2.set_control(value);
+    }
 
-        if self.channel_2.can_trigger() {
-            self.control.set_channel_on(ChannelType::Pulse2, true);
-            self.channel_2.trigger();
-        }
+    pub(super) fn wave_ram(&self, index: usize) -> u8 {
+        self.wave_ram[index]
+    }
+
+    pub(super) fn set_wave_ram(&mut self, index: usize, value: u8) {
+        self.wave_ram[index] = value;
     }
 
     pub(super) fn tick(&mut self, div: u8) {
-        if !self.control.is_powered_on() {
+        if !self.enabled {
             return;
         }
 
@@ -116,13 +135,7 @@ impl Apu {
 
             if self.div_apu_counter % 2 == 0 {
                 // Tick channel sound lengths
-                if self.control.is_channel_on(ChannelType::Pulse2) {
-                    self.channel_2.tick_length_timer();
-
-                    if self.channel_2.length_timer_expired() {
-                        self.control.set_channel_on(ChannelType::Pulse2, false);
-                    }
-                }
+                self.channel_2.tick_length_timer();
             }
 
             if self.div_apu_counter % 4 == 0 {
@@ -131,28 +144,12 @@ impl Apu {
 
             if self.div_apu_counter % 8 == 0 {
                 // Tick channel envelopes
-                if self.control.is_channel_on(ChannelType::Pulse2) {
-                    self.channel_2.tick_envelope();
-                }
+                self.channel_2.tick_envelope();
             }
         }
 
         self.div = div;
-
-        if self.control.is_channel_on(ChannelType::Pulse2) {
-            self.channel_2.tick_period_divider();
-        }
-    }
-
-    fn trigger(&mut self, channel: ChannelType) {
-        if !self.control.is_channel_on(channel) {
-            self.control.set_channel_on(channel, true);
-
-            match channel {
-                ChannelType::Pulse2 => self.channel_2.trigger(),
-                _ => {}
-            }
-        }
+        self.channel_2.tick_period_divider();
     }
 }
 

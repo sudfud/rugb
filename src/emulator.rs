@@ -13,6 +13,7 @@ pub(super) use joypad::{ActionButton, DirectionButton};
 
 use std::path::Path;
 
+use apu::Apu;
 use bus::Bus;
 use cartridge::{Cartridge, CartridgeError};
 use cpu::{Cpu, CpuError};
@@ -53,6 +54,7 @@ impl std::fmt::Display for EmulatorError {
 }
 
 pub(super) struct Emulator {
+    apu: Apu,
     cartridge: Cartridge,
     cpu: Cpu,
     dma: Dma,
@@ -72,6 +74,7 @@ impl Emulator {
         let cartridge = Cartridge::try_from(cart_path).map_err(EmulatorError::Cartridge)?;
 
         Ok(Self {
+            apu: Apu::new(),
             cartridge,
             cpu: Cpu::new(),
             dma: Dma::new(),
@@ -93,6 +96,7 @@ impl Emulator {
 
     pub(super) fn step(&mut self) -> Result<u32, EmulatorError> {
         let bus = Bus {
+            apu: &mut self.apu,
             cartridge: &mut self.cartridge,
             dma: &mut self.dma,
             hram: &mut self.hram,

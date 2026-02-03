@@ -1,6 +1,6 @@
 use super::dma::DmaState;
 use super::interrupts::InterruptType;
-use super::{Cartridge, Dma, Hram, Interrupts, Joypad, Oam, Ppu, Serial, Timer, Vram, Wram};
+use super::{Apu, Cartridge, Dma, Hram, Interrupts, Joypad, Oam, Ppu, Serial, Timer, Vram, Wram};
 
 pub(super) const ROM_START: u16 = 0x0000;
 pub(super) const VRAM_START: u16 = 0x8000;
@@ -23,6 +23,11 @@ const REG_TAC: u16 = 0xFF07;
 
 const REG_IF: u16 = 0xFF0F;
 
+const REG_AUDTERM: u16 = 0xFF25;
+const REG_AUDENA: u16 = 0xFF26;
+
+const WAVE_RAM_START: u16 = 0xFF30;
+
 const REG_LCDC: u16 = 0xFF40;
 const REG_STAT: u16 = 0xFF41;
 const REG_SCY: u16 = 0xFF42;
@@ -39,6 +44,7 @@ const REG_WX: u16 = 0xFF4B;
 const REG_IE: u16 = 0xFFFF;
 
 pub(super) struct Bus<'a> {
+    pub(super) apu: &'a mut Apu,
     pub(super) cartridge: &'a mut Cartridge,
     pub(super) dma: &'a mut Dma,
     pub(super) hram: &'a mut Hram,
@@ -84,6 +90,10 @@ impl<'a> Bus<'a> {
             REG_TAC => self.timer.control(),
 
             REG_IF => self.interrupts.flags(),
+
+            REG_AUDTERM => self.apu.panning(),
+            REG_AUDENA => self.apu.control(),
+            WAVE_RAM_START..REG_LCDC => self.apu.wave_ram((address - WAVE_RAM_START) as usize),
 
             REG_LCDC => self.ppu.lcd_control(),
             REG_STAT => self.ppu.lcd_status(),
@@ -135,6 +145,10 @@ impl<'a> Bus<'a> {
             REG_TAC => self.timer.set_control(value),
 
             REG_IF => self.interrupts.set_flags(value),
+
+            REG_AUDTERM => self.apu.set_panning(value),
+            REG_AUDENA => self.apu.set_control(value),
+            WAVE_RAM_START..REG_LCDC => self.apu.set_wave_ram((address - WAVE_RAM_START) as usize, value),
 
             REG_LCDC => self.ppu.set_lcd_control(value),
             REG_STAT => self.ppu.set_lcd_status(value),

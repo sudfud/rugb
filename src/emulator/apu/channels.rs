@@ -8,6 +8,7 @@ pub(super) enum ChannelType {
 }
 
 pub(super) struct PulseChannel {
+    enabled: bool,
     dac_enabled: bool,
 
     duty_length_register: DutyLengthRegister,
@@ -27,12 +28,13 @@ pub(super) struct PulseChannel {
     length_enabled: bool,
     length_counter: u8,
 
-    duty_step: u8
+    duty_step: usize
 }
 
 impl PulseChannel {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(enabled: bool) -> Self {
         Self {
+            enabled,
             dac_enabled: false,
 
             duty_length_register: DutyLengthRegister(0x3F),
@@ -54,6 +56,14 @@ impl PulseChannel {
 
             duty_step: 0
         }
+    }
+
+    pub(super) fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub(super) fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
 
     pub(super) fn dac_enabled(&self) -> bool {
@@ -94,13 +104,18 @@ impl PulseChannel {
         } else if self.length_enabled && !self.control_register.length_enabled() {
             self.length_enabled = false;
         }
-    }
-
-    pub(super) fn can_trigger(&self) -> bool {
-        self.control_register.trigger() && self.dac_enabled
+        
+        if self.control_register.trigger() && self.dac_enabled {
+            self.enabled = true;
+            self.trigger();
+        }
     }
 
     pub(super) fn tick_period_divider(&mut self) {
+        if !self.enabled {
+            return;
+        }
+
         self.period_timer = self.period_timer.wrapping_add(1);
 
         if self.period_timer % 4 != 0 {
@@ -118,8 +133,7 @@ impl PulseChannel {
     }
 
     pub(super) fn tick_envelope(&mut self) {
-        // Envelope is disabled if sweep pace is 0
-        if self.sweep_pace == 0 {
+        if !(self.enabled && self.sweep_pace > 0) {
             return;
         }
 
@@ -136,15 +150,17 @@ impl PulseChannel {
     }
 
     pub(super) fn tick_length_timer(&mut self) {
-        if !self.length_enabled {
+        if !(self.enabled && self.length_enabled) {
             return;
         }
 
         self.length_counter += 1;
-    }
 
-    pub(super) fn length_timer_expired(&self) -> bool {
-        self.length_enabled && self.length_counter >= 64
+        if self.length_counter < 64 {
+            return;
+        }
+
+        self.enabled = false;
     }
 
     pub(super) fn trigger(&mut self) {
@@ -159,12 +175,39 @@ impl PulseChannel {
         self.period_counter = self.current_period;
     }
 
+    pub(super) fn sample(&self) -> f32 {
+        let duty_cycle = self.duty_length_register.duty_cycle();
+        let max = u8::MAX as f32;
+
+        (2.0 * duty_cycle[self.duty_step] as f32 - max) / max
+    }
+
     pub(super) fn clear(&mut self) {
         self.duty_length_register.0 = 0;
         self.volume_register.0 = 0;
         self.control_register.0 = 0;
         self.dac_enabled = false;
         self.sweep_pace = 0;
+    }
+
+    pub(super) fn sample_analog(&self) -> f32 {
+        match self.sample_digital() {
+            Some(digital_sample) => (digital_sample as f32 - 7.5) / 7.5,
+            None => 0.0
+        }
+    }
+
+    fn sample_digital(&self) -> Option<u8> {
+        if !self.dac_enabled {
+            return None;
+        }
+
+        if !self.enabled {
+            return Some(0);
+        }
+
+        let wave_step = self.duty_length_register.duty_cycle()[self.duty_step];
+        Some(wave_step * self.current_volume)
     }
 }
 
