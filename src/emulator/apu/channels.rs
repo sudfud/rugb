@@ -141,9 +141,9 @@ impl PulseChannel {
             self.duty_step = (self.duty_step + 1) % 8;
 
             let wave_step = self.duty_length_register.duty_cycle()[self.duty_step];
-            let amplitude = (wave_step as i32 * 2 - 1) * self.current_volume as i32;
+            let amplitude = (wave_step as i32 * 2 - 1) * self.current_volume as i32 * 100;
 
-            self.blip.add_delta(2000 * self.period_timer, amplitude - self.amplitude);
+            self.blip.add_delta(self.period_timer * 2000, amplitude - self.amplitude);
             self.blip.end_frame(self.period_timer * 2000);
             self.period_timer = 0;
             self.amplitude = amplitude;
