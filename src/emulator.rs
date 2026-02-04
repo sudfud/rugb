@@ -122,4 +122,12 @@ impl Emulator {
     pub(super) fn set_direction_button(&mut self, button: DirectionButton, pressed: bool) {
         self.joypad.set_direction_button(button, pressed);
     }
+
+    pub(super) fn samples_available(&self) -> u32 {
+        self.apu.samples_available()
+    }
+
+    pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
+        self.apu.collect_samples(count)
+    }
 }

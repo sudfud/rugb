@@ -5,6 +5,7 @@ extern crate sdl2;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use sdl2::audio::AudioSpecDesired;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::{Color, PixelFormatEnum};
@@ -85,11 +86,28 @@ fn main() -> Result<(), RugbError> {
         let mut event_pump = sdl_context.event_pump().map_err(RugbError::Sdl)?;
         let mut tick_count = 0;
 
+        let audio = sdl_context.audio().map_err(RugbError::Sdl)?;
+        let audio_queue = audio.open_queue::<i16, Option<&str>>(
+            None,
+            &AudioSpecDesired {
+                freq: Some(48000),
+                channels: Some(1),
+                samples: None
+            }
+        ).map_err(RugbError::Sdl)?;
+
         'running: loop {
             tick_count += emulator.step().map_err(RugbError::Emulator)?;
 
             if tick_count >= FRAME_TICKS {
                 tick_count -= FRAME_TICKS;
+
+                while emulator.samples_available() < 804 {
+                    emulator.step().map_err(RugbError::Emulator)?;
+                }
+
+                let samples = emulator.collect_samples(804);
+                audio_queue.queue_audio(&samples).map_err(RugbError::Sdl)?;
 
                 canvas.clear();
 

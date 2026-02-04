@@ -23,6 +23,10 @@ const REG_TAC: u16 = 0xFF07;
 
 const REG_IF: u16 = 0xFF0F;
 
+const REG_AUD2LEN: u16 = 0xFF16;
+const REG_AUD2ENV: u16 = 0xFF17;
+const REG_AUD2LOW: u16 = 0xFF18;
+const REG_AUD2HIGH: u16 = 0xFF19;
 const REG_AUDTERM: u16 = 0xFF25;
 const REG_AUDENA: u16 = 0xFF26;
 
@@ -91,6 +95,9 @@ impl<'a> Bus<'a> {
 
             REG_IF => self.interrupts.flags(),
 
+            REG_AUD2LEN => self.apu.channel_2_duty_length(),
+            REG_AUD2ENV => self.apu.channel_2_volume(),
+            REG_AUD2HIGH => self.apu.channel_2_control(),
             REG_AUDTERM => self.apu.panning(),
             REG_AUDENA => self.apu.control(),
             WAVE_RAM_START..REG_LCDC => self.apu.wave_ram((address - WAVE_RAM_START) as usize),
@@ -146,6 +153,10 @@ impl<'a> Bus<'a> {
 
             REG_IF => self.interrupts.set_flags(value),
 
+            REG_AUD2LEN => self.apu.set_channel_2_duty_length(value),
+            REG_AUD2ENV => self.apu.set_channel_2_volume(value),
+            REG_AUD2LOW => self.apu.set_channel_2_period_low(value),
+            REG_AUD2HIGH => self.apu.set_channel_2_control(value),
             REG_AUDTERM => self.apu.set_panning(value),
             REG_AUDENA => self.apu.set_control(value),
             WAVE_RAM_START..REG_LCDC => self.apu.set_wave_ram((address - WAVE_RAM_START) as usize, value),
@@ -181,6 +192,7 @@ impl<'a> Bus<'a> {
         }
 
         for _ in 0..ticks {
+            self.apu.tick(self.timer.divider());
             self.ppu.tick(self.vram, self.oam);
             self.dma
                 .tick(self.cartridge, self.vram, self.wram, self.oam);

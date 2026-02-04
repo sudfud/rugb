@@ -1,3 +1,4 @@
+use blip_buf::BlipBuf;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChannelType {
@@ -20,7 +21,7 @@ pub(super) struct PulseChannel {
     envelope_direction: EnvelopeDirection,
     sweep_pace: u8,
 
-    period_timer: u8,
+    period_timer: u32,
     period_low: u8,
     current_period: u16,
     period_counter: u16,
@@ -28,11 +29,17 @@ pub(super) struct PulseChannel {
     length_enabled: bool,
     length_counter: u8,
 
-    duty_step: usize
+    duty_step: usize,
+
+    amplitude: i32,
+    blip: BlipBuf
 }
 
 impl PulseChannel {
     pub(super) fn new(enabled: bool) -> Self {
+        let mut blip = BlipBuf::new(4000);
+        blip.set_rates((1 << 22) as f64, 48000.0);
+
         Self {
             enabled,
             dac_enabled: false,
@@ -54,7 +61,10 @@ impl PulseChannel {
             length_enabled: false,
             length_counter: 0,
 
-            duty_step: 0
+            duty_step: 0,
+
+            amplitude: 0,
+            blip: BlipBuf::new(4000)
         }
     }
 
@@ -129,6 +139,14 @@ impl PulseChannel {
             self.current_period = (p_high << 8) | p_low;
             self.period_counter = self.current_period;
             self.duty_step = (self.duty_step + 1) % 8;
+
+            let wave_step = self.duty_length_register.duty_cycle()[self.duty_step];
+            let amplitude = (wave_step as i32 * 2 - 1) * self.current_volume as i32;
+
+            self.blip.add_delta(2000 * self.period_timer, amplitude - self.amplitude);
+            self.blip.end_frame(self.period_timer * 2000);
+            self.period_timer = 0;
+            self.amplitude = amplitude;
         }
     }
 
@@ -175,13 +193,6 @@ impl PulseChannel {
         self.period_counter = self.current_period;
     }
 
-    pub(super) fn sample(&self) -> f32 {
-        let duty_cycle = self.duty_length_register.duty_cycle();
-        let max = u8::MAX as f32;
-
-        (2.0 * duty_cycle[self.duty_step] as f32 - max) / max
-    }
-
     pub(super) fn clear(&mut self) {
         self.duty_length_register.0 = 0;
         self.volume_register.0 = 0;
@@ -190,24 +201,16 @@ impl PulseChannel {
         self.sweep_pace = 0;
     }
 
-    pub(super) fn sample_analog(&self) -> f32 {
-        match self.sample_digital() {
-            Some(digital_sample) => (digital_sample as f32 - 7.5) / 7.5,
-            None => 0.0
-        }
+    pub(super) fn samples_available(&self) -> u32 {
+        self.blip.samples_avail()
     }
 
-    fn sample_digital(&self) -> Option<u8> {
-        if !self.dac_enabled {
-            return None;
-        }
+    pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
+        let mut samples = vec![0; count];
 
-        if !self.enabled {
-            return Some(0);
-        }
+        self.blip.read_samples(samples.as_mut_slice(), false);
 
-        let wave_step = self.duty_length_register.duty_cycle()[self.duty_step];
-        Some(wave_step * self.current_volume)
+        samples
     }
 }
 

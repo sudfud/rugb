@@ -13,7 +13,8 @@ pub(super) struct Apu {
 
     channel_2: PulseChannel,
 
-    wave_ram: [u8; 16]
+    wave_ram: [u8; 16],
+    samples: Vec<f32>
 }
 
 impl Apu {
@@ -29,7 +30,8 @@ impl Apu {
 
             channel_2: PulseChannel::new(false),
 
-            wave_ram: [0x00; 16]
+            wave_ram: [0x00; 16],
+            samples: Vec::new()
         }
     }
 
@@ -127,6 +129,7 @@ impl Apu {
 
     pub(super) fn tick(&mut self, div: u8) {
         if !self.enabled {
+            self.samples.push(0.0);
             return;
         }
 
@@ -150,6 +153,15 @@ impl Apu {
 
         self.div = div;
         self.channel_2.tick_period_divider();
+
+    }
+
+    pub(super) fn samples_available(&self) -> u32 {
+        self.channel_2.samples_available()
+    }
+
+    pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
+        self.channel_2.collect_samples(count)
     }
 }
 
