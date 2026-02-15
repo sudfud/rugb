@@ -95,26 +95,13 @@ fn main() -> Result<(), RugbError> {
                 samples: None
             }
         ).map_err(RugbError::Sdl)?;
+        audio_queue.resume();
 
-        // let mut samples: Vec<i16> = Vec::new();
-
-        let samples: Vec<i16> = (0..96000)
-            .map(|i| {
-                if i % 200 < 100 {
-                    -100
-                } else {
-                    100
-                }
-            })
-            .collect();
+        let mut samples: Vec<i16> = Vec::new();
 
         'running: loop {
             tick_count += emulator.step().map_err(RugbError::Emulator)?;
 
-
-            audio_queue.queue_audio(&samples).map_err(RugbError::Sdl)?;
-            std::thread::sleep(Duration::from_secs(1));
-            break;
             // if emulator.samples_available() >= 804 {
             //     samples.append(&mut emulator.collect_samples(804));
             //     if samples.len() >= 48000 {
@@ -124,48 +111,52 @@ fn main() -> Result<(), RugbError> {
             //     }
             // }
 
-            // if tick_count >= FRAME_TICKS {
-            //     tick_count -= FRAME_TICKS;
+            if tick_count >= FRAME_TICKS {
+                tick_count -= FRAME_TICKS;
 
-            //     while emulator.samples_available() < 804 {
-            //         emulator.step().map_err(RugbError::Emulator)?;
-            //     }
+                if emulator.sound_enabled() {
+                    while emulator.samples_available() < 804 {
+                        tick_count += emulator.step().map_err(RugbError::Emulator)?;
+                    }
+                }
 
-            //     let samples = emulator.collect_samples(804);
-            //     audio_queue.queue_audio(&samples).map_err(RugbError::Sdl)?;
+                let samples = emulator.collect_samples(804 as usize);
+                audio_queue.queue_audio(&samples).map_err(RugbError::Sdl)?;
 
-            //     canvas.clear();
+                canvas.clear();
 
-            //     texture
-            //         .with_lock(None, |pixels, _pitch| {
-            //             pixels.copy_from_slice(emulator.frame_buffer().as_slice());
-            //         })
-            //         .map_err(RugbError::Sdl)?;
+                texture
+                    .with_lock(None, |pixels, _pitch| {
+                        pixels.copy_from_slice(emulator.frame_buffer().as_slice());
+                    })
+                    .map_err(RugbError::Sdl)?;
 
-            //     canvas.copy(&texture, None, None).map_err(RugbError::Sdl)?;
+                canvas.copy(&texture, None, None).map_err(RugbError::Sdl)?;
 
-            //     canvas.present();
+                canvas.present();
 
-            //     if Instant::now() - current_time < FRAME_TIME {
-            //         let sleep_time = FRAME_TIME - (Instant::now() - current_time);
-            //         std::thread::sleep(sleep_time);
-            //     }
+                if let Some(elapsed) = Instant::now().checked_duration_since(current_time) {
+                    if elapsed < FRAME_TIME {
+                        let sleep_time = FRAME_TIME - elapsed;
+                        std::thread::sleep(sleep_time);
+                    }
+                }
 
-            //     current_time = Instant::now();
+                current_time = Instant::now();
 
-            //     for event in event_pump.poll_iter() {
-            //         match event {
-            //             Event::KeyDown { keycode, .. } => {
-            //                 update_key_press(&mut emulator, keycode, true)
-            //             }
-            //             Event::KeyUp { keycode, .. } => {
-            //                 update_key_press(&mut emulator, keycode, false)
-            //             }
-            //             Event::Quit { .. } => break 'running,
-            //             _ => {}
-            //         }
-            //     }
-            // }
+                for event in event_pump.poll_iter() {
+                    match event {
+                        Event::KeyDown { keycode, .. } => {
+                            update_key_press(&mut emulator, keycode, true)
+                        }
+                        Event::KeyUp { keycode, .. } => {
+                            update_key_press(&mut emulator, keycode, false)
+                        }
+                        Event::Quit { .. } => break 'running,
+                        _ => {}
+                    }
+                }
+            }
         }
     } else {
         println!("Usage: rugb [file path]");

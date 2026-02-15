@@ -35,6 +35,10 @@ impl Apu {
         }
     }
 
+    pub(super) fn enabled(&self) -> bool {
+        self.enabled
+    }
+
     pub(super) fn control(&self) -> u8 {
         let mut data = 0x70;
 

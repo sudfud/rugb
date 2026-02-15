@@ -123,6 +123,10 @@ impl Emulator {
         self.joypad.set_direction_button(button, pressed);
     }
 
+    pub(super) fn sound_enabled(&self) -> bool {
+        self.apu.enabled()
+    }
+
     pub(super) fn samples_available(&self) -> u32 {
         self.apu.samples_available()
     }
