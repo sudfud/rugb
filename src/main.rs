@@ -97,28 +97,11 @@ fn main() -> Result<(), RugbError> {
         ).map_err(RugbError::Sdl)?;
         audio_queue.resume();
 
-        let mut samples: Vec<i16> = Vec::new();
-
         'running: loop {
             tick_count += emulator.step().map_err(RugbError::Emulator)?;
 
-            // if emulator.samples_available() >= 804 {
-            //     samples.append(&mut emulator.collect_samples(804));
-            //     if samples.len() >= 48000 {
-            //         audio_queue.queue_audio(&samples[0..48000]).map_err(RugbError::Sdl)?;
-            //         std::thread::sleep(Duration::from_secs(1));
-            //         break;
-            //     }
-            // }
-
             if tick_count >= FRAME_TICKS {
                 tick_count -= FRAME_TICKS;
-
-                // if emulator.sound_enabled() {
-                //     while emulator.samples_available() < 804 {
-                //         tick_count += emulator.step().map_err(RugbError::Emulator)?;
-                //     }
-                // }
 
                 let samples = emulator.collect_samples(804 as usize);
                 audio_queue.queue_audio(&samples).map_err(RugbError::Sdl)?;

@@ -28,10 +28,18 @@ const REG_AUD1LEN: u16 = 0xFF11;
 const REG_AUD1ENV: u16 = 0xFF12;
 const REG_AUD1LOW: u16 = 0xFF13;
 const REG_AUD1HIGH: u16 = 0xFF14;
+
 const REG_AUD2LEN: u16 = 0xFF16;
 const REG_AUD2ENV: u16 = 0xFF17;
 const REG_AUD2LOW: u16 = 0xFF18;
 const REG_AUD2HIGH: u16 = 0xFF19;
+
+const REG_AUD3ENA: u16 = 0xFF1A;
+const REG_AUD3LEN: u16 = 0xFF1B;
+const REG_AUD3LEVEL: u16 = 0xFF1C;
+const REG_AUD3LOW: u16 = 0xFF1D;
+const REG_AUD3HIGH: u16 = 0xFF1E;
+
 const REG_AUDVOL: u16 = 0xFF24;
 const REG_AUDTERM: u16 = 0xFF25;
 const REG_AUDENA: u16 = 0xFF26;
@@ -110,10 +118,14 @@ impl<'a> Bus<'a> {
             REG_AUD2ENV => self.apu.channel_2_volume(),
             REG_AUD2HIGH => self.apu.channel_2_control(),
 
+            REG_AUD3ENA => self.apu.channel_3_dac_enabled(),
+            REG_AUD3LEVEL => self.apu.channel_3_output_level(),
+            REG_AUD3HIGH => self.apu.channel_3_control(),
+
             REG_AUDVOL => self.apu.master_volume(),
             REG_AUDTERM => self.apu.panning(),
             REG_AUDENA => self.apu.control(),
-            WAVE_RAM_START..REG_LCDC => self.apu.wave_ram((address - WAVE_RAM_START) as usize),
+            WAVE_RAM_START..REG_LCDC => self.apu.wave_ram(address - WAVE_RAM_START),
 
             REG_LCDC => self.ppu.lcd_control(),
             REG_STAT => self.ppu.lcd_status(),
@@ -176,11 +188,17 @@ impl<'a> Bus<'a> {
             REG_AUD2ENV => self.apu.set_channel_2_volume(value),
             REG_AUD2LOW => self.apu.set_channel_2_period_low(value),
             REG_AUD2HIGH => self.apu.set_channel_2_control(value),
+
+            REG_AUD3ENA => self.apu.set_channel_3_dac_enabled(value),
+            REG_AUD3LEN => self.apu.set_channel_3_length_timer(value),
+            REG_AUD3LEVEL => self.apu.set_channel_3_output_level(value),
+            REG_AUD3LOW => self.apu.set_channel_3_period_low(value),
+            REG_AUD3HIGH => self.apu.set_channel_3_control(value),
             
             REG_AUDVOL => self.apu.set_master_volume(value),
             REG_AUDTERM => self.apu.set_panning(value),
             REG_AUDENA => self.apu.set_control(value),
-            WAVE_RAM_START..REG_LCDC => self.apu.set_wave_ram((address - WAVE_RAM_START) as usize, value),
+            WAVE_RAM_START..REG_LCDC => self.apu.set_wave_ram(address - WAVE_RAM_START, value),
 
             REG_LCDC => self.ppu.set_lcd_control(value),
             REG_STAT => self.ppu.set_lcd_status(value),

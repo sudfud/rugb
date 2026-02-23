@@ -61,7 +61,6 @@ impl PulseChannel {
             envelope_direction: Direction::Decreasing,
             sweep_pace: 0,
 
-            // period_timer: 0,
             period_low: 0xFF,
             current_period: 0,
             period_counter: 0,
@@ -146,12 +145,6 @@ impl PulseChannel {
         if !self.enabled {
             return;
         }
-
-        // self.period_timer = self.period_timer.wrapping_add(1);
-
-        // if self.period_timer % 4 != 0 {
-        //     return;
-        // }
 
         self.period_counter += 1;
 
@@ -292,11 +285,220 @@ impl PulseChannel {
 
     pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
         let mut samples = vec![0; count];
-
         self.blip.read_samples(samples.as_mut_slice(), false);
-
         samples
     }
+}
+
+pub(super) struct WaveChannel {
+    enabled: bool,
+    dac_enabled: bool,
+
+    blip: BlipBuf,
+
+    wave_ram: [u8; 16],
+    sample_index: usize,
+
+    length_enabled: bool,
+    initial_length_timer: u16,
+    length_counter: u16,
+
+    output_level: WaveOutputLevel,
+    current_output_level: WaveOutputLevel,
+
+    period_low: u8,
+    current_period: u16,
+    period_counter: u16,
+
+    control_register: ChannelControlRegister,
+
+    amplitude: i32
+}
+
+impl WaveChannel {
+    pub(super) fn new() -> Self {
+        let mut blip = BlipBuf::new(4000);
+        blip.set_rates((1 << 22) as f64, 48000.0);
+
+        Self {
+            enabled: false,
+            dac_enabled: false,
+
+            blip,
+
+            wave_ram: [0x00; 16],
+            sample_index: 1,
+
+            length_enabled: false,
+            initial_length_timer: 0xFF,
+            length_counter: 0xFF,
+
+            output_level: WaveOutputLevel::Mute,
+            current_output_level: WaveOutputLevel::Mute,
+
+            period_low: 0xFF,
+            current_period: 0x7FF,
+            period_counter: 0x800,
+
+            control_register: ChannelControlRegister(0xBF),
+
+            amplitude: 0
+        }
+    }
+
+    pub(super) fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub(super) fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    pub(super) fn dac_enabled(&self) -> u8 {
+        if self.dac_enabled {
+            0x80
+        } else {
+            0x00
+        }
+    }
+
+    pub(super) fn set_dac_enabled(&mut self, value: u8) {
+        self.dac_enabled = value & 0x80 > 0;
+        self.enabled = self.dac_enabled;
+    }
+
+    pub(super) fn wave_ram(&self, index: u16) -> u8 {
+        self.wave_ram[index as usize]
+    }
+
+    pub(super) fn set_wave_ram(&mut self, index: u16, value: u8) {
+        self.wave_ram[index as usize] = value;
+    }
+
+    pub(super) fn set_length_timer(&mut self, value: u8) {
+        self.initial_length_timer = value as u16;
+    }
+
+    pub(super) fn output_level(&self) -> u8 {
+        match self.output_level {
+            WaveOutputLevel::Mute => 0x00,
+            WaveOutputLevel::Full => 0x20,
+            WaveOutputLevel::Half => 0x40,
+            WaveOutputLevel::Quarter => 0x60
+        }
+    }
+
+    pub(super) fn set_output_level(&mut self, value: u8) {
+        self.output_level = match (value & 0x60) >> 5 {
+            0 => WaveOutputLevel::Mute,
+            1 => WaveOutputLevel::Full,
+            2 => WaveOutputLevel::Half,
+            _ => WaveOutputLevel::Quarter
+        };
+    }
+
+    pub(super) fn set_period_low(&mut self, value: u8) {
+        self.period_low = value;
+    }
+
+    pub(super) fn control(&self) -> u8 {
+        self.control_register.0 & 0xBF
+    }
+
+    pub(super) fn set_control(&mut self, value: u8) {
+        self.control_register.0 = value;
+
+        if !self.length_enabled && self.control_register.length_enabled() {
+            self.length_enabled = true;
+            self.length_counter = self.initial_length_timer;
+        } else if self.length_enabled && !self.control_register.length_enabled() {
+            self.length_enabled = false;
+        }
+        
+        if self.control_register.trigger() && self.dac_enabled {
+            self.enabled = true;
+            self.trigger();
+        }
+    }
+
+    pub(super) fn tick_period_divider(&mut self) {
+        if !self.enabled {
+            return;
+        }
+
+        self.period_counter += 1;
+
+        if self.period_counter > 0x7FF {
+            let (p_low, p_high) = (self.period_low as u16, self.control_register.period_high() as u16);
+            self.current_period = (p_high << 8) | p_low;
+            self.period_counter = self.current_period;
+            self.sample_index = (self.sample_index + 1) % 32;
+        }
+    }
+
+    pub(super) fn update_buffer(&mut self, clock_time: u32) {
+        let mut sample = if self.sample_index & 0x01 == 0 {
+            self.wave_ram[self.sample_index / 2] >> 4
+        } else {
+            self.wave_ram[self.sample_index / 2] & 0x0F
+        };
+
+        sample = match self.output_level {
+            WaveOutputLevel::Mute => 0,
+            WaveOutputLevel::Full => sample,
+            WaveOutputLevel::Half => sample >> 1,
+            WaveOutputLevel::Quarter => sample >> 2
+        };
+
+        let amplitude = sample as i32 * 200;
+
+        self.blip.add_delta(clock_time, amplitude - self.amplitude);
+        self.amplitude = amplitude;
+    }
+
+    pub(super) fn end_frame(&mut self, clock_duration: u32) {
+        self.blip.end_frame(clock_duration);
+    }
+
+    pub(super) fn tick_length_timer(&mut self) {
+        if !(self.enabled && self.length_enabled) {
+            return;
+        }
+
+        self.length_counter += 1;
+
+        if self.length_counter < 256 {
+            return;
+        }
+
+        self.enabled = false;
+    }
+
+    pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
+        let mut samples = vec![0; count];
+        self.blip.read_samples(&mut samples, false);
+        samples
+    }
+
+    fn trigger(&mut self) {
+        if self.length_counter >= 256 {
+            self.length_counter = self.initial_length_timer;
+        }
+
+        let (p_low, p_high) = (self.period_low as u16, self.control_register.period_high() as u16);
+        self.current_period = (p_high << 8) | p_low;
+        self.current_output_level = self.output_level;
+        self.period_counter = self.current_period;
+        self.sample_index = 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum WaveOutputLevel {
+    Mute,
+    Full,
+    Half,
+    Quarter
 }
 
 struct DutyLengthRegister(u8);
