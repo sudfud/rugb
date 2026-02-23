@@ -11,6 +11,9 @@ pub(super) struct Apu {
     panning: Panning,
     master_volume: AudioMasterVolume,
 
+    period_counter: u32,
+
+    channel_1: PulseChannel,
     channel_2: PulseChannel,
 
     wave_ram: [u8; 16],
@@ -28,7 +31,10 @@ impl Apu {
             panning: Panning(0xF3),
             master_volume: AudioMasterVolume(0x77),
 
-            channel_2: PulseChannel::new(false),
+            period_counter: 0,
+
+            channel_1: PulseChannel::new(true, true, 0xBF, 0xF3),
+            channel_2: PulseChannel::new(false, false, 0x3F, 0x00),
 
             wave_ram: [0x00; 16],
             samples: Vec::new()
@@ -46,6 +52,10 @@ impl Apu {
             data |= 0x80;
         }
 
+        if self.channel_1.enabled() {
+            data |= 0x01;
+        }
+
         if self.channel_2.enabled() {
             data |= 0x02;
         }
@@ -59,6 +69,7 @@ impl Apu {
         if !self.enabled {
             self.panning.0 = 0x00;
             self.master_volume.0 = 0x00;
+            self.channel_1.set_enabled(false);
             self.channel_2.set_enabled(false);
         }
     }
@@ -80,6 +91,54 @@ impl Apu {
     pub(super) fn set_master_volume(&mut self, value: u8) {
         if self.enabled {
             self.master_volume.0 = value;
+        }
+    }
+
+    pub(super) fn channel_1_sweep(&self) -> u8 {
+        self.channel_1.sweep()
+    }
+
+    pub(super) fn set_channel_1_sweep(&mut self, value: u8) {
+        if self.enabled {
+            self.channel_1.set_sweep(value);
+        }
+    }
+
+    pub(super) fn channel_1_duty_length(&self) -> u8 {
+        self.channel_1.duty_length()
+    }
+
+    pub(super) fn set_channel_1_duty_length(&mut self, value: u8) {
+        if self.enabled {
+            self.channel_1.set_duty_length(value);
+        }
+    }
+
+    pub(super) fn channel_1_volume(&self) -> u8 {
+        self.channel_1.volume()
+    }
+
+    pub(super) fn set_channel_1_volume(&mut self, value: u8) {
+        self.channel_1.set_volume(value);
+
+        if !self.channel_1.dac_enabled() {
+            self.channel_1.set_enabled(false);
+        }
+    }
+
+    pub(super) fn set_channel_1_period_low(&mut self, value: u8) {
+        if self.enabled {
+            self.channel_1.set_period_low(value);
+        }
+    }
+
+    pub(super) fn channel_1_control(&self) -> u8 {
+        self.channel_1.control()
+    }
+
+    pub(super) fn set_channel_1_control(&mut self, value: u8) {
+        if self.enabled {
+            self.channel_1.set_control(value);
         }
     }
 
@@ -116,11 +175,9 @@ impl Apu {
     }
 
     pub(super) fn set_channel_2_control(&mut self, value: u8) {
-        if !self.enabled {
-            return;
+        if self.enabled {
+            self.channel_2.set_control(value);
         }
-
-        self.channel_2.set_control(value);
     }
 
     pub(super) fn wave_ram(&self, index: usize) -> u8 {
@@ -142,22 +199,38 @@ impl Apu {
 
             if self.div_apu_counter % 2 == 0 {
                 // Tick channel sound lengths
+                self.channel_1.tick_length_timer();
                 self.channel_2.tick_length_timer();
             }
 
             if self.div_apu_counter % 4 == 0 {
                 // Tick CH1 frequency sweep
+                self.channel_1.tick_sweep();
             }
 
             if self.div_apu_counter % 8 == 0 {
                 // Tick channel envelopes
+                self.channel_1.tick_envelope();
                 self.channel_2.tick_envelope();
             }
         }
 
         self.div = div;
-        self.channel_2.tick_period_divider();
 
+        self.period_counter += 1;
+
+        if self.period_counter % 4 == 0 {
+            self.channel_1.tick_period_divider();
+            self.channel_2.tick_period_divider();
+            self.channel_1.update_buffer(self.period_counter);
+            self.channel_2.update_buffer(self.period_counter);
+        }
+
+        if self.period_counter >= 256 {
+            self.channel_1.end_frame(self.period_counter);
+            self.channel_2.end_frame(self.period_counter);
+            self.period_counter = 0;
+        }
     }
 
     pub(super) fn samples_available(&self) -> u32 {
@@ -165,7 +238,16 @@ impl Apu {
     }
 
     pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
-        self.channel_2.collect_samples(count)
+        let ch1_samples = self.channel_1.collect_samples(count);
+        let ch2_samples = self.channel_2.collect_samples(count);
+
+        let mut mixed_samples: Vec<i16> = Vec::new();
+
+        for i in 0..ch1_samples.len() {
+            mixed_samples.push((ch1_samples[i] + ch2_samples[i]) / 2);
+        }
+
+        mixed_samples
     }
 }
 

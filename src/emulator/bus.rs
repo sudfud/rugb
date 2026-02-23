@@ -23,10 +23,16 @@ const REG_TAC: u16 = 0xFF07;
 
 const REG_IF: u16 = 0xFF0F;
 
+const REG_AUD1SWEEP: u16 = 0xFF10;
+const REG_AUD1LEN: u16 = 0xFF11;
+const REG_AUD1ENV: u16 = 0xFF12;
+const REG_AUD1LOW: u16 = 0xFF13;
+const REG_AUD1HIGH: u16 = 0xFF14;
 const REG_AUD2LEN: u16 = 0xFF16;
 const REG_AUD2ENV: u16 = 0xFF17;
 const REG_AUD2LOW: u16 = 0xFF18;
 const REG_AUD2HIGH: u16 = 0xFF19;
+const REG_AUDVOL: u16 = 0xFF24;
 const REG_AUDTERM: u16 = 0xFF25;
 const REG_AUDENA: u16 = 0xFF26;
 
@@ -95,9 +101,16 @@ impl<'a> Bus<'a> {
 
             REG_IF => self.interrupts.flags(),
 
+            REG_AUD1SWEEP => self.apu.channel_1_sweep(),
+            REG_AUD1LEN => self.apu.channel_1_duty_length(),
+            REG_AUD1ENV => self.apu.channel_1_volume(),
+            REG_AUD1HIGH => self.apu.channel_1_control(),
+
             REG_AUD2LEN => self.apu.channel_2_duty_length(),
             REG_AUD2ENV => self.apu.channel_2_volume(),
             REG_AUD2HIGH => self.apu.channel_2_control(),
+
+            REG_AUDVOL => self.apu.master_volume(),
             REG_AUDTERM => self.apu.panning(),
             REG_AUDENA => self.apu.control(),
             WAVE_RAM_START..REG_LCDC => self.apu.wave_ram((address - WAVE_RAM_START) as usize),
@@ -153,10 +166,18 @@ impl<'a> Bus<'a> {
 
             REG_IF => self.interrupts.set_flags(value),
 
+            REG_AUD1SWEEP => self.apu.set_channel_1_sweep(value),
+            REG_AUD1LEN => self.apu.set_channel_1_duty_length(value),
+            REG_AUD1ENV => self.apu.set_channel_1_volume(value),
+            REG_AUD1LOW => self.apu.set_channel_1_period_low(value),
+            REG_AUD1HIGH => self.apu.set_channel_1_control(value),
+
             REG_AUD2LEN => self.apu.set_channel_2_duty_length(value),
             REG_AUD2ENV => self.apu.set_channel_2_volume(value),
             REG_AUD2LOW => self.apu.set_channel_2_period_low(value),
             REG_AUD2HIGH => self.apu.set_channel_2_control(value),
+            
+            REG_AUDVOL => self.apu.set_master_volume(value),
             REG_AUDTERM => self.apu.set_panning(value),
             REG_AUDENA => self.apu.set_control(value),
             WAVE_RAM_START..REG_LCDC => self.apu.set_wave_ram((address - WAVE_RAM_START) as usize, value),

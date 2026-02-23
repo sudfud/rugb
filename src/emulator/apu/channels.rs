@@ -15,13 +15,14 @@ pub(super) struct PulseChannel {
     duty_length_register: DutyLengthRegister,
     volume_register: ChannelVolumeRegister,
     control_register: ChannelControlRegister,
+    sweep_control: Option<SweepControl>,
 
     envelope_counter: u8,
     current_volume: u8,
-    envelope_direction: EnvelopeDirection,
+    envelope_direction: Direction,
     sweep_pace: u8,
 
-    period_timer: u32,
+    // period_timer: u32,
     period_low: u8,
     current_period: u16,
     period_counter: u16,
@@ -36,24 +37,31 @@ pub(super) struct PulseChannel {
 }
 
 impl PulseChannel {
-    pub(super) fn new(enabled: bool) -> Self {
+    pub(super) fn new(enabled: bool, with_sweep: bool, duty_length_reg: u8, volume_reg: u8) -> Self {
         let mut blip = BlipBuf::new(4000);
         blip.set_rates((1 << 22) as f64, 48000.0);
+
+        let sweep_control = if with_sweep {
+            Some(SweepControl::new())
+        } else {
+            None
+        };
 
         Self {
             enabled,
             dac_enabled: false,
 
-            duty_length_register: DutyLengthRegister(0x3F),
-            volume_register: ChannelVolumeRegister(0x00),
+            duty_length_register: DutyLengthRegister(duty_length_reg),
+            volume_register: ChannelVolumeRegister(volume_reg),
             control_register: ChannelControlRegister(0xBF),
+            sweep_control,
 
             envelope_counter: 0,
             current_volume: 0,
-            envelope_direction: EnvelopeDirection::Decreasing,
+            envelope_direction: Direction::Decreasing,
             sweep_pace: 0,
 
-            period_timer: 0,
+            // period_timer: 0,
             period_low: 0xFF,
             current_period: 0,
             period_counter: 0,
@@ -78,6 +86,19 @@ impl PulseChannel {
 
     pub(super) fn dac_enabled(&self) -> bool {
         self.dac_enabled
+    }
+
+    pub(super) fn sweep(&self) -> u8 {
+        match self.sweep_control {
+            Some(ref sweep_control) => sweep_control.register.0,
+            None => 0xFF
+        }
+    }
+
+    pub(super) fn set_sweep(&mut self, value: u8) {
+        if let Some(ref mut sweep_control) = self.sweep_control {
+            sweep_control.register.0 = value;
+        }
     }
 
     pub(super) fn duty_length(&self) -> u8 {
@@ -126,11 +147,11 @@ impl PulseChannel {
             return;
         }
 
-        self.period_timer = self.period_timer.wrapping_add(1);
+        // self.period_timer = self.period_timer.wrapping_add(1);
 
-        if self.period_timer % 4 != 0 {
-            return;
-        }
+        // if self.period_timer % 4 != 0 {
+        //     return;
+        // }
 
         self.period_counter += 1;
 
@@ -139,14 +160,6 @@ impl PulseChannel {
             self.current_period = (p_high << 8) | p_low;
             self.period_counter = self.current_period;
             self.duty_step = (self.duty_step + 1) % 8;
-
-            let wave_step = self.duty_length_register.duty_cycle()[self.duty_step];
-            let amplitude = (wave_step as i32 * 2 - 1) * self.current_volume as i32 * 1000;
-
-            self.blip.add_delta(self.period_timer, amplitude - self.amplitude);
-            self.blip.end_frame(self.period_timer);
-            self.period_timer = 0;
-            self.amplitude = amplitude;
         }
     }
 
@@ -161,9 +174,10 @@ impl PulseChannel {
             return;
         }
 
+        self.envelope_counter = 0;
         self.current_volume = match self.envelope_direction {
-            EnvelopeDirection::Decreasing => self.current_volume.saturating_sub(1),
-            EnvelopeDirection::Increasing => u8::max(self.current_volume + 1, 15)
+            Direction::Decreasing => self.current_volume.saturating_sub(1),
+            Direction::Increasing => u8::max(self.current_volume + 1, 15)
         };
     }
 
@@ -181,16 +195,87 @@ impl PulseChannel {
         self.enabled = false;
     }
 
+    pub(super) fn tick_sweep(&mut self) {
+        match self.sweep_control {
+            Some(ref mut sweep_control) => {
+                if !sweep_control.enabled || sweep_control.current_pace == 0 {
+                    return;
+                }
+
+                sweep_control.sweep_counter += 1;
+                
+                if sweep_control.sweep_counter < sweep_control.current_pace {
+                    return;
+                }
+
+                sweep_control.sweep_counter = 0;
+
+                let freq = sweep_control.calculate_frequency();
+
+                if freq > 0x7FF {
+                    self.enabled = false;
+                    return;
+                }
+
+                sweep_control.freq_shadow = freq;
+
+                self.period_low = freq as u8;
+                self.control_register.set_period_high((freq >> 8) as u8);
+
+                // Repeat frequency calculation/overflow check, but don't update frequency
+                let freq = sweep_control.calculate_frequency();
+
+                if freq > 0x7FF {
+                    self.enabled = false;
+                    return;
+                }
+
+                sweep_control.current_pace = sweep_control.register.pace();
+            },
+            None => return
+        }
+    }
+
     pub(super) fn trigger(&mut self) {
         self.current_volume = self.volume_register.initial_volume();
         self.envelope_direction = self.volume_register.envelope_direction();
         self.sweep_pace = self.volume_register.sweep_pace();
         self.envelope_counter = 0;
-        self.period_timer = 0;
+        // self.period_timer = 0;
 
         let (p_low, p_high) = (self.period_low as u16, self.control_register.period_high() as u16);
         self.current_period = (p_high << 8) | p_low;
         self.period_counter = self.current_period;
+
+        if let Some(ref mut sweep_control) = self.sweep_control {
+            sweep_control.freq_shadow = self.current_period;
+            sweep_control.sweep_counter = 0;
+            sweep_control.current_pace = sweep_control.register.pace();
+            sweep_control.enabled = sweep_control.register.pace() > 0 || sweep_control.register.step() > 0;
+
+            if sweep_control.register.step() == 0 {
+                return;
+            }
+
+            let freq = sweep_control.calculate_frequency();
+
+            if freq > 0x7FF {
+                self.enabled = false;
+            }
+        }
+    }
+
+    pub(super) fn update_buffer(&mut self, clock_time: u32) {
+        let wave_step = self.duty_length_register.duty_cycle()[self.duty_step];
+        let amplitude = (wave_step as i32 * 2 - 1) * self.current_volume as i32 * 100;
+
+        self.blip.add_delta(clock_time, amplitude - self.amplitude);
+        self.amplitude = amplitude;
+    }
+
+    pub(super) fn end_frame(&mut self, clock_duration: u32) {
+        self.blip.end_frame(clock_duration);
+        // self.period_timer = 0;
     }
 
     pub(super) fn clear(&mut self) {
@@ -237,7 +322,7 @@ impl DutyLengthRegister {
 }
 
 #[derive(Clone, Copy)]
-enum EnvelopeDirection {
+enum Direction {
     Decreasing,
     Increasing
 }
@@ -249,10 +334,10 @@ impl ChannelVolumeRegister {
         self.0 >> 4
     }
 
-    fn envelope_direction(&self) -> EnvelopeDirection {
+    fn envelope_direction(&self) -> Direction {
         match (self.0 & 0x08) >> 3 {
-            0 => EnvelopeDirection::Decreasing,
-            _ => EnvelopeDirection::Increasing
+            0 => Direction::Decreasing,
+            _ => Direction::Increasing
         }
     }
 
@@ -274,5 +359,57 @@ impl ChannelControlRegister {
 
     fn period_high(&self) -> u8 {
         self.0 & 0x07
+    }
+
+    fn set_period_high(&mut self, value: u8) {
+        self.0 = (self.0 & 0xF8) | (value & 0x07);
+    }
+}
+
+struct ChannelSweepRegister(u8);
+
+impl ChannelSweepRegister {
+    fn pace(&self) -> u8 {
+        (self.0 & 0x70) >> 4
+    }
+
+    fn direction(&self) -> Direction {
+        match self.0 & 0x08 {
+            0 => Direction::Increasing,
+            _ => Direction::Decreasing
+        }
+    }
+
+    fn step(&self) -> u8 {
+        self.0 & 0x07
+    }
+}
+
+struct SweepControl {
+    enabled: bool,
+    register: ChannelSweepRegister,
+    sweep_counter: u8,
+    freq_shadow: u16,
+    current_pace: u8
+}
+
+impl SweepControl {
+    fn new() -> Self {
+        Self {
+            enabled: false,
+            register: ChannelSweepRegister(0x80),
+            sweep_counter: 0,
+            freq_shadow: 0,
+            current_pace: 0
+        }
+    }
+
+    fn calculate_frequency(&self) -> u16 {
+        let offset = self.freq_shadow >> self.register.step();
+
+        match self.register.direction() {
+            Direction::Increasing => self.freq_shadow + offset,
+            Direction::Decreasing => self.freq_shadow.wrapping_add_signed(-(offset as i16))
+        }
     }
 }

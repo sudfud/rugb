@@ -114,11 +114,11 @@ fn main() -> Result<(), RugbError> {
             if tick_count >= FRAME_TICKS {
                 tick_count -= FRAME_TICKS;
 
-                if emulator.sound_enabled() {
-                    while emulator.samples_available() < 804 {
-                        tick_count += emulator.step().map_err(RugbError::Emulator)?;
-                    }
-                }
+                // if emulator.sound_enabled() {
+                //     while emulator.samples_available() < 804 {
+                //         tick_count += emulator.step().map_err(RugbError::Emulator)?;
+                //     }
+                // }
 
                 let samples = emulator.collect_samples(804 as usize);
                 audio_queue.queue_audio(&samples).map_err(RugbError::Sdl)?;
