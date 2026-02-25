@@ -1,6 +1,6 @@
 mod channels;
 
-use channels::{ChannelType, PulseChannel, WaveChannel};
+use channels::{ChannelType, PulseChannel, WaveChannel, NoiseChannel};
 
 pub(super) struct Apu {
     enabled: bool,
@@ -15,6 +15,7 @@ pub(super) struct Apu {
     channel_1: PulseChannel,
     channel_2: PulseChannel,
     channel_3: WaveChannel,
+    channel_4: NoiseChannel,
 
     samples: Vec<f32>
 }
@@ -34,6 +35,7 @@ impl Apu {
             channel_1: PulseChannel::new(true, true, 0xBF, 0xF3),
             channel_2: PulseChannel::new(false, false, 0x3F, 0x00),
             channel_3: WaveChannel::new(),
+            channel_4: NoiseChannel::new(),
 
             samples: Vec::new()
         }
@@ -62,6 +64,10 @@ impl Apu {
             data |= 0x04;
         }
 
+        if self.channel_4.enabled() {
+            data |= 0x08;
+        }
+
         data
     }
 
@@ -71,9 +77,18 @@ impl Apu {
         if !self.enabled {
             self.panning.0 = 0x00;
             self.master_volume.0 = 0x00;
+
             self.channel_1.set_enabled(false);
+            self.channel_1.reset();
+
             self.channel_2.set_enabled(false);
+            self.channel_2.reset();
+
             self.channel_3.set_enabled(false);
+            self.channel_3.reset();
+
+            self.channel_4.set_enabled(false);
+            self.channel_4.reset();
         }
     }
 
@@ -122,10 +137,12 @@ impl Apu {
     }
 
     pub(super) fn set_channel_1_volume(&mut self, value: u8) {
-        self.channel_1.set_volume(value);
+        if self.enabled {
+            self.channel_1.set_volume(value);
 
-        if !self.channel_1.dac_enabled() {
-            self.channel_1.set_enabled(false);
+            if !self.channel_1.dac_enabled() {
+                self.channel_1.set_enabled(false);
+            }
         }
     }
 
@@ -160,10 +177,12 @@ impl Apu {
     }
 
     pub(super) fn set_channel_2_volume(&mut self, value: u8) {
-        self.channel_2.set_volume(value);
+        if self.enabled {
+            self.channel_2.set_volume(value);
 
-        if !self.channel_2.dac_enabled() {
-            self.channel_2.set_enabled(false);
+            if !self.channel_2.dac_enabled() {
+                self.channel_2.set_enabled(false);
+            }
         }
     }
 
@@ -230,8 +249,46 @@ impl Apu {
     }
 
     pub(super) fn set_wave_ram(&mut self, index: u16, value: u8) {
+        self.channel_3.set_wave_ram(index, value);
+    }
+
+    pub(super) fn set_channel_4_length_timer(&mut self, value: u8) {
         if self.enabled {
-            self.channel_3.set_wave_ram(index, value);
+            self.channel_4.set_length_timer(value);
+        }
+    }
+
+    pub(super) fn channel_4_volume(&self) -> u8 {
+        self.channel_4.volume()
+    }
+
+    pub(super) fn set_channel_4_volume(&mut self, value: u8) {
+        if self.enabled {
+            self.channel_4.set_volume(value);
+
+            if !self.channel_4.dac_enabled() {
+                self.channel_4.set_enabled(false);
+            }
+        }
+    }
+
+    pub(super) fn channel_4_randomness(&self) -> u8 {
+        self.channel_4.randomness()
+    }
+
+    pub(super) fn set_channel_4_randomness(&mut self, value: u8) {
+        if self.enabled {
+            self.channel_4.set_randomness(value);
+        }
+    }
+
+    pub(super) fn channel_4_control(&self) -> u8 {
+        self.channel_4.control()
+    }
+
+    pub(super) fn set_channel_4_control(&mut self, value: u8) {
+        if self.enabled {
+            self.channel_4.set_control(value);
         }
     }
 
@@ -241,6 +298,7 @@ impl Apu {
             return;
         }
 
+
         if self.div & 0x10 > 0 && div & 0x10 == 0 {
             self.div_apu_counter = self.div_apu_counter.wrapping_add(1);
 
@@ -249,6 +307,7 @@ impl Apu {
                 self.channel_1.tick_length_timer();
                 self.channel_2.tick_length_timer();
                 self.channel_3.tick_length_timer();
+                self.channel_4.tick_length_timer();
             }
 
             if self.div_apu_counter % 4 == 0 {
@@ -260,6 +319,7 @@ impl Apu {
                 // Tick channel envelopes
                 self.channel_1.tick_envelope();
                 self.channel_2.tick_envelope();
+                self.channel_4.tick_envelope();
             }
         }
 
@@ -267,22 +327,31 @@ impl Apu {
 
         self.period_counter += 1;
 
+        self.channel_4.tick_period_divider();
+
         if self.period_counter % 2 == 0 {
             self.channel_3.tick_period_divider();
-            self.channel_3.update_buffer(self.period_counter);
         }
 
         if self.period_counter % 4 == 0 {
             self.channel_1.tick_period_divider();
             self.channel_2.tick_period_divider();
-            self.channel_1.update_buffer(self.period_counter);
-            self.channel_2.update_buffer(self.period_counter);
         }
 
         if self.period_counter >= 256 {
+            
+            self.channel_1.update_buffer(self.period_counter);
             self.channel_1.end_frame(self.period_counter);
+
+            self.channel_2.update_buffer(self.period_counter);
             self.channel_2.end_frame(self.period_counter);
+            
+            self.channel_3.update_buffer(self.period_counter);
             self.channel_3.end_frame(self.period_counter);
+
+            
+            self.channel_4.update_buffer(self.period_counter);
+            self.channel_4.end_frame(self.period_counter);
             self.period_counter = 0;
         }
     }
@@ -295,11 +364,12 @@ impl Apu {
         let ch1_samples = self.channel_1.collect_samples(count);
         let ch2_samples = self.channel_2.collect_samples(count);
         let ch3_samples = self.channel_3.collect_samples(count);
+        let ch4_samples = self.channel_4.collect_samples(count);
 
         let mut mixed_samples: Vec<i16> = Vec::new();
 
         for i in 0..ch1_samples.len() {
-            mixed_samples.push((ch1_samples[i] + ch2_samples[i] + ch3_samples[i]) / 3);
+            mixed_samples.push((ch1_samples[i] + ch2_samples[i] + ch3_samples[i] + ch4_samples[i]) / 4);
         }
 
         mixed_samples

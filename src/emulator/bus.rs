@@ -40,6 +40,11 @@ const REG_AUD3LEVEL: u16 = 0xFF1C;
 const REG_AUD3LOW: u16 = 0xFF1D;
 const REG_AUD3HIGH: u16 = 0xFF1E;
 
+const REG_AUD4LEN: u16 = 0xFF20;
+const REG_AUD4ENV: u16 = 0xFF21;
+const REG_AUD4POLY: u16 = 0xFF22;
+const REG_AUD4GO: u16 = 0xFF23;
+
 const REG_AUDVOL: u16 = 0xFF24;
 const REG_AUDTERM: u16 = 0xFF25;
 const REG_AUDENA: u16 = 0xFF26;
@@ -122,6 +127,10 @@ impl<'a> Bus<'a> {
             REG_AUD3LEVEL => self.apu.channel_3_output_level(),
             REG_AUD3HIGH => self.apu.channel_3_control(),
 
+            REG_AUD4ENV => self.apu.channel_4_volume(),
+            REG_AUD4POLY => self.apu.channel_4_randomness(),
+            REG_AUD4GO => self.apu.channel_4_control(),
+
             REG_AUDVOL => self.apu.master_volume(),
             REG_AUDTERM => self.apu.panning(),
             REG_AUDENA => self.apu.control(),
@@ -194,6 +203,11 @@ impl<'a> Bus<'a> {
             REG_AUD3LEVEL => self.apu.set_channel_3_output_level(value),
             REG_AUD3LOW => self.apu.set_channel_3_period_low(value),
             REG_AUD3HIGH => self.apu.set_channel_3_control(value),
+
+            REG_AUD4LEN => self.apu.set_channel_4_length_timer(value),
+            REG_AUD4ENV => self.apu.set_channel_4_volume(value),
+            REG_AUD4POLY => self.apu.set_channel_4_randomness(value),
+            REG_AUD4GO => self.apu.set_channel_4_control(value),
             
             REG_AUDVOL => self.apu.set_master_volume(value),
             REG_AUDTERM => self.apu.set_panning(value),
