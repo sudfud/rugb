@@ -52,7 +52,7 @@ fn main() -> Result<(), RugbError> {
         let video_subsystem = sdl_context.video().map_err(RugbError::Sdl)?;
 
         let mut window = video_subsystem
-            .window("demo", SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+            .window("RuGB", SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
             .position_centered()
             .resizable()
             .build()
