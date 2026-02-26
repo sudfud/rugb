@@ -34,6 +34,7 @@ impl Timer {
     pub(super) fn set_divider(&mut self) {
         self.divider = 0x00;
         self.system_clock = 0x00;
+        self.timer_clock = 0x00;
     }
 
     pub(super) fn counter(&self) -> u8 {
