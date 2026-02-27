@@ -221,7 +221,7 @@ impl<'a> Bus<'a> {
             REG_LYC => self.ppu.set_ly_compare(value),
             REG_DMA => {
                 self.ppu.set_dma_start(value);
-                self.dma.start((value as u16) << 8);
+                self.dma.start(((value & 0xDF) as u16) << 8);
             }
             REG_BGP => self.ppu.set_bg_palette(value),
             REG_OBP0 => self.ppu.set_obj_palette_0(value),

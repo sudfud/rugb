@@ -117,7 +117,7 @@ impl Ppu {
     }
 
     pub(super) fn set_dma_start(&mut self, value: u8) {
-        self.regs.dma_start = value & 0xDF;
+        self.regs.dma_start = value;
     }
 
     pub(super) fn bg_palette(&self) -> u8 {
