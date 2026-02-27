@@ -1,14 +1,15 @@
 pub struct Timer {
-    divider: u8,
+    divider: u16,
     counter: u8,
     modulo: u8,
-    control: u8,
-    enabled: bool,
-    step_count: u32,
-    system_clock: u32,
-    timer_clock: u32,
+    control: TimerControl,
+    // enabled: bool,
+    // step_count: u32,
+    // system_clock: u32,
+    // timer_clock: u32,
     interrupt: bool,
     tick_count: u32,
+    falling_edge_detector: FallingEdgeDetector
 }
 
 impl Timer {
@@ -17,24 +18,25 @@ impl Timer {
             divider: 0x00,
             counter: 0x00,
             modulo: 0x00,
-            control: 0x00,
-            enabled: false,
-            step_count: 1024,
-            system_clock: 0,
-            timer_clock: 0,
+            control: TimerControl(0xF8),
+            // enabled: false,
+            // step_count: 1024,
+            // system_clock: 0,
+            // timer_clock: 0,
             interrupt: false,
             tick_count: 0,
+            falling_edge_detector: FallingEdgeDetector::new()
         }
     }
 
     pub(super) fn divider(&self) -> u8 {
-        self.divider
+        (self.divider >> 6) as u8
     }
 
     pub(super) fn set_divider(&mut self) {
         self.divider = 0x00;
-        self.system_clock = 0x00;
-        self.timer_clock = 0x00;
+        // self.system_clock = 0x00;
+        // self.timer_clock = 0x00;
     }
 
     pub(super) fn counter(&self) -> u8 {
@@ -54,19 +56,18 @@ impl Timer {
     }
 
     pub(super) fn control(&self) -> u8 {
-        self.control
+        self.control.0
     }
 
     pub(super) fn set_control(&mut self, value: u8) {
-        self.control = value & 0x07;
-
-        self.enabled = self.control & 0x04 > 0x00;
-        self.step_count = match self.control & 0x03 {
-            0 => 1024,
-            1 => 16,
-            2 => 64,
-            _ => 256,
-        };
+        self.control.0 = value | 0xF8;
+        // self.enabled = self.control & 0x04 > 0x00;
+        // self.step_count = match self.control & 0x03 {
+        //     0 => 1024,
+        //     1 => 16,
+        //     2 => 64,
+        //     _ => 256,
+        // };
     }
 
     pub(super) fn interrupt(&self) -> bool {
@@ -85,27 +86,79 @@ impl Timer {
         self.tick_count = 0;
     }
 
-    pub(super) fn cycle(&mut self, ticks: u32) {
-        self.tick_count += ticks;
-        self.system_clock += ticks;
+    pub(super) fn cycle(&mut self, t_cycles: u32) {
+        self.tick_count += t_cycles;
 
-        while self.system_clock >= 256 {
+        let m_cycles = t_cycles / 4;
+
+        for _ in 0..m_cycles {
             self.divider = self.divider.wrapping_add(1);
-            self.system_clock -= 256;
-        }
 
-        if self.enabled {
-            self.timer_clock += ticks;
-            while self.timer_clock >= self.step_count {
+            let step = match self.control.frequency() {
+                0 => self.divider & 0x80,
+                1 => self.divider & 0x02,
+                2 => self.divider & 0x08,
+                _ => self.divider & 0x20   
+            };
+
+            if self.falling_edge_detector.detect(step > 0 && self.control.enabled()) {
                 self.counter = self.counter.wrapping_add(1);
 
                 if self.counter == 0 {
                     self.counter = self.modulo;
                     self.interrupt = true;
                 }
-
-                self.timer_clock -= self.step_count;
             }
         }
+        // self.system_clock += ticks;
+
+        // while self.system_clock >= 256 {
+        //     self.divider = self.divider.wrapping_add(1);
+        //     self.system_clock -= 256;
+        // }
+
+        // if self.enabled {
+        //     self.timer_clock += ticks;
+        //     while self.timer_clock >= self.step_count {
+        //         self.counter = self.counter.wrapping_add(1);
+
+        //         if self.counter == 0 {
+        //             self.counter = self.modulo;
+        //             self.interrupt = true;
+        //         }
+
+        //         self.timer_clock -= self.step_count;
+        //     }
+        // }
+    }
+}
+
+struct TimerControl(u8);
+
+impl TimerControl {
+    fn enabled(&self) -> bool {
+        self.0 & 0x04 > 0
+    }
+
+    fn frequency(&self) -> u8 {
+        self.0 & 0x03
+    }
+}
+
+struct FallingEdgeDetector {
+    prev: bool
+}
+
+impl FallingEdgeDetector {
+    fn new() -> Self {
+        Self {
+            prev: false
+        }
+    }
+
+    fn detect(&mut self, next: bool) -> bool {
+        let result = self.prev && !next;
+        self.prev = next;
+        result
     }
 }
