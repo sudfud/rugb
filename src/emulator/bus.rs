@@ -92,7 +92,7 @@ impl<'a> Bus<'a> {
         if let DmaState::Transferring(byte) = self.dma.state()
             && address < IO_START
         {
-            return byte;
+            return 0xFF;
         }
 
         match address {

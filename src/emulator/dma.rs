@@ -31,7 +31,7 @@ impl Dma {
             DmaState::Initializing => {
                 self.counter += 1;
 
-                if self.counter < 4 {
+                if self.counter < 8 {
                     return;
                 }
 
