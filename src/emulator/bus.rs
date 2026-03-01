@@ -90,7 +90,7 @@ impl<'a> Bus<'a> {
 
     pub(super) fn read(&self, address: u16) -> u8 {
         if let DmaState::Transferring(byte) = self.dma.state()
-            && address < IO_START
+            && address >= OAM_START && address < UNUSED_START
         {
             return 0xFF;
         }
@@ -163,7 +163,7 @@ impl<'a> Bus<'a> {
 
     pub(super) fn write(&mut self, address: u16, value: u8) {
         if let DmaState::Transferring(_) = self.dma.state()
-            && address < IO_START
+            && address >= OAM_START && address < UNUSED_START
         {
             return;
         }
