@@ -4,7 +4,9 @@ use super::{Cartridge, Oam, Vram, Wram};
 pub(super) struct Dma {
     state: DmaState,
     counter: u8,
+    restart_counter: u8,
     current_address: u16,
+    restart_address: Option<u16>
 }
 
 impl Dma {
@@ -12,7 +14,9 @@ impl Dma {
         Self {
             state: DmaState::Idle,
             counter: 0,
+            restart_counter: 0,
             current_address: 0,
+            restart_address: None
         }
     }
 
@@ -21,8 +25,15 @@ impl Dma {
     }
 
     pub(super) fn start(&mut self, address: u16) {
-        self.state = DmaState::Initializing;
-        self.current_address = address;
+        if let DmaState::Transferring(_) = self.state {
+            self.restart_address = Some(address);
+            self.restart_counter = 2;
+        }
+        else {
+            self.state = DmaState::Initializing;
+            self.current_address = address;
+            self.counter = 0;
+        }
     }
 
     pub(super) fn tick(&mut self, cartridge: &Cartridge, vram: &Vram, wram: &Wram, oam: &mut Oam) {
@@ -46,6 +57,17 @@ impl Dma {
                 }
 
                 self.counter = 0;
+
+                if let Some(address) = self.restart_address {
+                    self.restart_counter -= 1;
+
+                    if self.restart_counter == 0 {
+                        self.current_address = address;
+                        self.state = DmaState::Transferring(self.read(cartridge, vram, wram));
+                        self.restart_address = None;
+                        return;
+                    }
+                }
 
                 let oam_address = 0xFE00 | (self.current_address & 0x00FF);
                 self.write(oam_address, byte, oam);
@@ -76,7 +98,7 @@ impl Dma {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DmaState {
     Idle,
     Initializing,

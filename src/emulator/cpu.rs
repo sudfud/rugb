@@ -42,6 +42,10 @@ impl Cpu {
         }
     }
 
+    pub(super) fn pc(&self) -> u16 {
+        self.registers.pc
+    }
+
     pub(super) fn execute(&mut self, mut bus: Bus) -> Result<u32, CpuError> {
         self.update_ime();
 
@@ -2338,6 +2342,12 @@ impl Cpu {
         }
 
         false
+    }
+}
+
+impl std::fmt::Display for Cpu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.registers.fmt(f)
     }
 }
 

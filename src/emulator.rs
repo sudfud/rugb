@@ -90,6 +90,10 @@ impl Emulator {
         })
     }
 
+    pub(super) fn pc(&self) -> u16 {
+        self.cpu.pc()
+    }
+
     pub(super) fn frame_buffer(&self) -> &FrameBuffer {
         self.ppu.frame_buffer()
     }
@@ -133,5 +137,11 @@ impl Emulator {
 
     pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
         self.apu.collect_samples(count)
+    }
+}
+
+impl std::fmt::Display for Emulator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.cpu.fmt(f)
     }
 }
