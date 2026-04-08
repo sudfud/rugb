@@ -7,7 +7,7 @@ impl Serial {
     pub(super) fn new() -> Self {
         Self {
             data: 0x00,
-            control: 0x00,
+            control: 0x7E,
         }
     }
 

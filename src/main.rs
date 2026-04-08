@@ -98,7 +98,6 @@ fn main() -> Result<(), RugbError> {
         audio_queue.resume();
 
         'running: loop {
-
             tick_count += emulator.step().map_err(RugbError::Emulator)?;
 
             if tick_count >= FRAME_TICKS {

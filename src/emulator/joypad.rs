@@ -24,7 +24,7 @@ pub(super) struct Joypad {
 impl Joypad {
     pub(super) fn new() -> Self {
         Self {
-            data: 0xFF,
+            data: 0xCF,
             action: 0x0F,
             direction: 0x0F,
             interrupt: false,

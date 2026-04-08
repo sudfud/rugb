@@ -3,10 +3,8 @@ pub struct Timer {
     counter: u8,
     modulo: u8,
     control: TimerControl,
-    // enabled: bool,
-    // step_count: u32,
-    // system_clock: u32,
-    // timer_clock: u32,
+    overflow: bool,
+    ignore_tima_write: bool,
     interrupt: bool,
     tick_count: u32,
     falling_edge_detector: FallingEdgeDetector
@@ -15,14 +13,12 @@ pub struct Timer {
 impl Timer {
     pub(super) fn new() -> Self {
         Self {
-            divider: 0x00,
+            divider: 0xAB,
             counter: 0x00,
             modulo: 0x00,
             control: TimerControl(0xF8),
-            // enabled: false,
-            // step_count: 1024,
-            // system_clock: 0,
-            // timer_clock: 0,
+            overflow: false,
+            ignore_tima_write: false,
             interrupt: false,
             tick_count: 0,
             falling_edge_detector: FallingEdgeDetector::new()
@@ -35,8 +31,6 @@ impl Timer {
 
     pub(super) fn set_divider(&mut self) {
         self.divider = 0x00;
-        // self.system_clock = 0x00;
-        // self.timer_clock = 0x00;
     }
 
     pub(super) fn counter(&self) -> u8 {
@@ -44,7 +38,15 @@ impl Timer {
     }
 
     pub(super) fn set_counter(&mut self, value: u8) {
-        self.counter = value;
+        // Don't handle overflow if TIMA is written to during the M-cycle after it occured
+        if self.overflow {
+            self.overflow = false;
+            self.interrupt = false;
+        }
+
+        if !self.ignore_tima_write {
+            self.counter = value;
+        }
     }
 
     pub(super) fn modulo(&self) -> u8 {
@@ -52,7 +54,11 @@ impl Timer {
     }
 
     pub(super) fn set_modulo(&mut self, value: u8) {
-        self.modulo = value
+        self.modulo = value;
+
+        if self.ignore_tima_write {
+            self.counter = value;
+        }
     }
 
     pub(super) fn control(&self) -> u8 {
@@ -61,13 +67,6 @@ impl Timer {
 
     pub(super) fn set_control(&mut self, value: u8) {
         self.control.0 = value | 0xF8;
-        // self.enabled = self.control & 0x04 > 0x00;
-        // self.step_count = match self.control & 0x03 {
-        //     0 => 1024,
-        //     1 => 16,
-        //     2 => 64,
-        //     _ => 256,
-        // };
     }
 
     pub(super) fn interrupt(&self) -> bool {
@@ -93,6 +92,14 @@ impl Timer {
 
         for _ in 0..m_cycles {
             self.divider = self.divider.wrapping_add(1);
+            
+            if self.overflow {
+                self.counter = self.modulo;
+                self.overflow = false;
+                self.ignore_tima_write = true;
+            } else if self.ignore_tima_write {
+                self.ignore_tima_write = false;
+            }
 
             let step = match self.control.frequency() {
                 0 => self.divider & 0x80,
@@ -104,32 +111,13 @@ impl Timer {
             if self.falling_edge_detector.detect(step > 0 && self.control.enabled()) {
                 self.counter = self.counter.wrapping_add(1);
 
+                // Handle overflow during the next M-cycle
                 if self.counter == 0 {
-                    self.counter = self.modulo;
+                    self.overflow = true;
                     self.interrupt = true;
                 }
             }
         }
-        // self.system_clock += ticks;
-
-        // while self.system_clock >= 256 {
-        //     self.divider = self.divider.wrapping_add(1);
-        //     self.system_clock -= 256;
-        // }
-
-        // if self.enabled {
-        //     self.timer_clock += ticks;
-        //     while self.timer_clock >= self.step_count {
-        //         self.counter = self.counter.wrapping_add(1);
-
-        //         if self.counter == 0 {
-        //             self.counter = self.modulo;
-        //             self.interrupt = true;
-        //         }
-
-        //         self.timer_clock -= self.step_count;
-        //     }
-        // }
     }
 }
 

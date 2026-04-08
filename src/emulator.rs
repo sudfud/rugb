@@ -138,6 +138,10 @@ impl Emulator {
     pub(super) fn collect_samples(&mut self, count: usize) -> Vec<i16> {
         self.apu.collect_samples(count)
     }
+
+    pub(super) fn tima(&self) -> u8 {
+        self.timer.counter()
+    }
 }
 
 impl std::fmt::Display for Emulator {
