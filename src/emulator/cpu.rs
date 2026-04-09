@@ -995,7 +995,10 @@ impl Cpu {
             }
 
             // DI
-            0xF3 => self.di_timer = 1,
+            0xF3 => {
+                self.di_timer = 1;
+                self.ei_timer = 0;
+            },
 
             // PUSH AF
             0xF5 => self.push_stack(bus, self.registers.af()),
@@ -1042,7 +1045,7 @@ impl Cpu {
 
             // EI
             0xFB => if self.ei_timer == 0 {
-                self.ei_timer = 2
+                self.ei_timer = 2;
             },
 
             // CP A, d8
