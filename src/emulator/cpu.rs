@@ -1041,7 +1041,9 @@ impl Cpu {
             }
 
             // EI
-            0xFB => self.ei_timer = 2,
+            0xFB => if self.ei_timer == 0 {
+                self.ei_timer = 2
+            },
 
             // CP A, d8
             0xFE => {
@@ -2288,6 +2290,7 @@ impl Cpu {
         self.ei_timer = match self.ei_timer {
             2 => 1,
             1 => {
+                // println!("enable interrupt!");
                 self.interrupt_master_enable = true;
                 0
             }
